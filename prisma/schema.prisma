@@ -1,0 +1,376 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+
+// Better Auth required models
+model User {
+  id                 String              @id @default(cuid())
+  studentId          String              @unique  // Primary login identifier
+  email              String              @unique
+  phone              String              @unique
+  password           String              // Hashed password
+  name               String?
+  image              String?
+  emailVerified      Boolean             @default(false)
+  role               Role                @default(STUDENT)
+
+  // Additional profile fields
+  course             String?
+  yearOfStudy        Int?
+  bio                String?
+  isActive           Boolean             @default(true)
+
+  // Password reset
+  resetToken         String?             @unique
+  resetTokenExpiry   DateTime?
+
+  // Timestamps
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  lastLoginAt        DateTime?
+
+  // Relations
+  sessions           Session[]
+  accounts           Account[]             // <--- FIX APPLIED HERE
+  blogs              Blog[]
+  comments           Comment[]
+  eventRegistrations EventRegistration[]
+  createdEvents      Event[]               @relation("EventCreator")
+  reactions          Reaction[]
+  notifications      Notification[]
+  activities         Activity[]
+
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("sessions")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Verification {
+  id          String   @id @default(cuid())
+  identifier  String
+  value       String
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([identifier, value])
+  @@map("verifications")
+}
+
+enum Role {
+  STUDENT
+  ADMIN
+  SUPER_ADMIN
+}
+
+// Blog Management
+model Blog {
+  id           String         @id @default(cuid())
+  title        String
+  slug         String         @unique
+  content      String         @db.Text
+  excerpt      String?
+  coverImage   String?
+  published    Boolean        @default(false)
+  publishedAt  DateTime?
+  views        Int            @default(0)
+  authorId     String
+  author       User           @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  categoryId   String?
+  category     Category?      @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  tags         Tag[]
+  comments     Comment[]
+  reactions    Reaction[]
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@map("blogs")
+}
+
+model Category {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  slug        String   @unique
+  description String?
+  blogs       Blog[]
+  events      Event[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("categories")
+}
+
+model Tag {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  slug      String   @unique
+  blogs     Blog[]
+  createdAt DateTime @default(now())
+
+  @@map("tags")
+}
+
+model Comment {
+  id        String       @id @default(cuid())
+  content   String       @db.Text
+  blogId    String
+  blog      Blog         @relation(fields: [blogId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User         @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  parentId  String?
+  parent    Comment?     @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies   Comment[]    @relation("CommentReplies")
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  @@map("comments")
+}
+
+model Reaction {
+  id        String       @id @default(cuid())
+  type      ReactionType
+  blogId    String
+  blog      Blog         @relation(fields: [blogId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime     @default(now())
+
+  @@unique([blogId, userId])
+  @@map("reactions")
+}
+
+enum ReactionType {
+  LIKE
+  LOVE
+  INSIGHTFUL
+}
+
+// Events Management
+model Event {
+  id                   String              @id @default(cuid())
+  title                String
+  slug                 String              @unique
+  description          String              @db.Text
+  coverImage           String?
+  location             String
+  eventType            EventType
+  startDate            DateTime
+  endDate              DateTime
+  registrationDeadline DateTime?
+  maxAttendees         Int?
+  status               EventStatus         @default(UPCOMING)
+  createdById          String
+  createdBy            User                @relation("EventCreator", fields: [createdById], references: [id])
+  categoryId           String?
+  category             Category?           @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  registrations        EventRegistration[]
+  gallery              GalleryImage[]
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  @@map("events")
+}
+
+enum EventType {
+  MEETING
+  COMPETITION
+  WORKSHOP
+  SEMINAR
+  SOCIAL
+  OTHER
+}
+
+enum EventStatus {
+  UPCOMING
+  ONGOING
+  COMPLETED
+  CANCELLED
+}
+
+model EventRegistration {
+  id        String             @id @default(cuid())
+  eventId   String
+  event     Event              @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  status    RegistrationStatus @default(REGISTERED)
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  @@unique([eventId, userId])
+  @@map("event_registrations")
+}
+
+enum RegistrationStatus {
+  REGISTERED
+  ATTENDED
+  CANCELLED
+}
+
+// Gallery Management
+model GalleryImage {
+  id          String   @id @default(cuid())
+  title       String
+  imageUrl    String
+  description String?
+  eventId     String?
+  event       Event?   @relation(fields: [eventId], references: [id], onDelete: SetNull)
+  albumId     String?
+  album       Album?   @relation(fields: [albumId], references: [id], onDelete: SetNull)
+  uploadedAt  DateTime @default(now())
+
+  @@map("gallery_images")
+}
+
+model Album {
+  id          String         @id @default(cuid())
+  name        String
+  description String?
+  coverImage  String?
+  images      GalleryImage[]
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@map("albums")
+}
+
+// Contact & Notifications
+model Contact {
+  id        String        @id @default(cuid())
+  name      String
+  email     String
+  subject   String
+  message   String        @db.Text
+  status    ContactStatus @default(UNREAD)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  @@map("contacts")
+}
+
+enum ContactStatus {
+  UNREAD
+  READ
+  REPLIED
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  message   String
+  type      NotificationType
+  link      String?
+  read      Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  @@map("notifications")
+}
+
+enum NotificationType {
+  EVENT
+  BLOG
+  COMMENT
+  SYSTEM
+  ANNOUNCEMENT
+}
+
+// Activity Logs
+model Activity {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  action      String
+  entity      String
+  entityId    String
+  description String?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  @@map("activities")
+}
+
+// Resources
+model Resource {
+  id          String           @id @default(cuid())
+  title       String
+  description String?
+  fileUrl     String
+  fileType    String
+  fileSize    Int
+  category    ResourceCategory
+  downloads   Int              @default(0)
+  uploadedAt  DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@map("resources")
+}
+
+enum ResourceCategory {
+  STUDY_MATERIAL
+  PAST_PAPER
+  NOTES
+  DOCUMENTATION
+  OTHER
+}
+
+// Newsletter
+model Newsletter {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  isActive     Boolean  @default(true)
+  subscribedAt DateTime @default(now())
+
+  @@map("newsletters")
+}
+
+// Settings/Config
+model Setting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String   @db.Text
+  updatedAt DateTime @updatedAt
+
+  @@map("settings")
+}
