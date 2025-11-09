@@ -1,9 +1,7 @@
 import { Request, Response } from "express";
 import prisma from "../config/database";
-import slugify from "slugify";
 
 export class EventController {
-  // ✅ 1. Create new event (Admin / Super Admin only)
   static async createEvent(req: Request, res: Response) {
     try {
       const {
@@ -18,131 +16,162 @@ export class EventController {
         maxAttendees,
         categoryId,
       } = req.body;
+      const userId = req.user?.id;
 
-      if (!title || !description || !eventType || !startDate || !endDate) {
-        return res.status(400).json({
-          success: false,
-          message: "Missing required fields.",
-        });
+      if (!userId) {
+        return res
+          .status(401)
+          .json({ success: false, message: "Unauthorized" });
       }
 
-      // Generate unique slug
-      const slugBase = slugify(title, { lower: true, strict: true });
-      let slug = slugBase;
-      let count = 1;
-
-      while (await prisma.event.findUnique({ where: { slug } })) {
-        slug = `${slugBase}-${count++}`;
+      if (
+        !title ||
+        !description ||
+        !location ||
+        !eventType ||
+        !startDate ||
+        !endDate
+      ) {
+        return res
+          .status(400)
+          .json({
+            success: false,
+            message:
+              "Title, description, location, event type, start date, and end date are required",
+          });
       }
 
-      // Determine event status
-      const now = new Date();
-      let status: any = "UPCOMING";
-      const start = new Date(startDate);
-      const end = new Date(endDate);
-
-      if (now >= start && now <= end) status = "ONGOING";
-      else if (now > end) status = "COMPLETED";
+      const slug =
+        title
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/(^-|-$)/g, "") +
+        "-" +
+        Date.now();
 
       const event = await prisma.event.create({
         data: {
           title,
           slug,
           description,
-          coverImage,
+          coverImage: coverImage || null,
           location,
           eventType,
-          startDate: start,
-          endDate: end,
+          startDate: new Date(startDate),
+          endDate: new Date(endDate),
           registrationDeadline: registrationDeadline
             ? new Date(registrationDeadline)
             : null,
-          maxAttendees: maxAttendees ? Number(maxAttendees) : null,
-          status,
+          maxAttendees: maxAttendees ? parseInt(maxAttendees) : null,
+          createdById: userId,
           categoryId: categoryId || null,
-          createdById: req.user.id,
         },
         include: {
-          category: true,
           createdBy: {
-            select: { id: true, name: true, email: true, role: true },
+            select: { id: true, name: true, studentId: true, image: true },
           },
+          category: true,
+          _count: { select: { registrations: true } },
         },
       });
 
-      return res.status(201).json({
-        success: true,
-        message: "Event created successfully.",
-        data: event,
+      await prisma.activity.create({
+        data: {
+          userId,
+          action: "CREATE_EVENT",
+          entity: "Event",
+          entityId: event.id,
+          description: `Created event: ${title}`,
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent") || null,
+        },
       });
+
+      return res
+        .status(201)
+        .json({
+          success: true,
+          message: "Event created successfully",
+          data: { event },
+        });
     } catch (error) {
       console.error("Create event error:", error);
-      return res.status(500).json({
-        success: false,
-        message: "Failed to create event.",
-      });
+      return res
+        .status(500)
+        .json({
+          success: false,
+          message: "An error occurred while creating the event",
+        });
     }
   }
 
-  // ✅ 2. Get all events (Public)
   static async getAllEvents(req: Request, res: Response) {
     try {
       const {
-        status,
-        eventType,
-        category,
         search,
-        startDate,
-        endDate,
-        sort = "desc",
-      } = req.query;
+        categoryId,
+        eventType,
+        status,
+        page = 1,
+        limit = 10,
+        sortBy = "startDate",
+        sortOrder = "desc",
+      } = req.query as any;
 
-      const filters: any = {};
+      const skip = (parseInt(page) - 1) * parseInt(limit);
+      const where: any = {};
 
-      if (status) filters.status = status;
-      if (eventType) filters.eventType = eventType;
-      if (category)
-        filters.category = {
-          name: { contains: String(category), mode: "insensitive" },
-        };
-      if (search)
-        filters.OR = [
-          { title: { contains: String(search), mode: "insensitive" } },
-          { description: { contains: String(search), mode: "insensitive" } },
+      if (search) {
+        where.OR = [
+          { title: { contains: search, mode: "insensitive" } },
+          { description: { contains: search, mode: "insensitive" } },
+          { location: { contains: search, mode: "insensitive" } },
         ];
-
-      if (startDate && endDate) {
-        filters.startDate = { gte: new Date(startDate as string) };
-        filters.endDate = { lte: new Date(endDate as string) };
       }
 
+      if (categoryId) where.categoryId = categoryId;
+      if (eventType) where.eventType = eventType;
+      if (status) where.status = status;
+
+      const total = await prisma.event.count({ where });
+
       const events = await prisma.event.findMany({
-        where: filters,
-        orderBy: { createdAt: sort === "asc" ? "asc" : "desc" },
+        where,
+        skip,
+        take: parseInt(limit),
+        orderBy: { [sortBy]: sortOrder },
         include: {
-          category: true,
           createdBy: {
-            select: { id: true, name: true, email: true, role: true },
+            select: { id: true, name: true, studentId: true, image: true },
           },
-          _count: { select: { registrations: true } },
+          category: true,
+          _count: { select: { registrations: true, gallery: true } },
         },
       });
 
       return res.status(200).json({
         success: true,
-        count: events.length,
-        data: events,
+        data: {
+          events,
+          pagination: {
+            total,
+            page: parseInt(page),
+            limit: parseInt(limit),
+            totalPages: Math.ceil(total / parseInt(limit)),
+          },
+        },
       });
     } catch (error) {
       console.error("Get all events error:", error);
-      return res.status(500).json({
-        success: false,
-        message: "Failed to fetch events.",
-      });
+      return res
+        .status(500)
+        .json({
+          success: false,
+          message: "An error occurred while fetching events",
+        });
     }
   }
 
-  // ✅ 3. Get single event (Public)
   static async getEventById(req: Request, res: Response) {
     try {
       const { id } = req.params;
@@ -150,184 +179,590 @@ export class EventController {
       const event = await prisma.event.findUnique({
         where: { id },
         include: {
-          category: true,
           createdBy: {
-            select: { id: true, name: true, email: true, role: true },
-          },
-          registrations: {
-            include: {
-              user: { select: { id: true, name: true, email: true } },
+            select: {
+              id: true,
+              name: true,
+              studentId: true,
+              image: true,
+              role: true,
             },
           },
-          gallery: true,
+          category: true,
+          registrations: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                  studentId: true,
+                  email: true,
+                  phone: true,
+                  image: true,
+                },
+              },
+            },
+            orderBy: { createdAt: "desc" },
+          },
+          gallery: { orderBy: { uploadedAt: "desc" } },
+          _count: { select: { registrations: true, gallery: true } },
         },
       });
 
       if (!event) {
-        return res.status(404).json({
-          success: false,
-          message: "Event not found.",
-        });
+        return res
+          .status(404)
+          .json({ success: false, message: "Event not found" });
       }
 
-      return res.status(200).json({
-        success: true,
-        data: event,
-      });
+      return res.status(200).json({ success: true, data: { event } });
     } catch (error) {
-      console.error("Get event by id error:", error);
-      return res.status(500).json({
-        success: false,
-        message: "Failed to fetch event.",
-      });
+      console.error("Get event by ID error:", error);
+      return res
+        .status(500)
+        .json({
+          success: false,
+          message: "An error occurred while fetching the event",
+        });
     }
   }
 
-  // ✅ 4. Update event (Admin / Super Admin)
+  static async getEventBySlug(req: Request, res: Response) {
+    try {
+      const { slug } = req.params;
+
+      const event = await prisma.event.findUnique({
+        where: { slug },
+        include: {
+          createdBy: {
+            select: {
+              id: true,
+              name: true,
+              studentId: true,
+              image: true,
+              role: true,
+            },
+          },
+          category: true,
+          registrations: {
+            include: {
+              user: {
+                select: { id: true, name: true, studentId: true, image: true },
+              },
+            },
+          },
+          gallery: { orderBy: { uploadedAt: "desc" } },
+          _count: { select: { registrations: true, gallery: true } },
+        },
+      });
+
+      if (!event) {
+        return res
+          .status(404)
+          .json({ success: false, message: "Event not found" });
+      }
+
+      return res.status(200).json({ success: true, data: { event } });
+    } catch (error) {
+      console.error("Get event by slug error:", error);
+      return res
+        .status(500)
+        .json({
+          success: false,
+          message: "An error occurred while fetching the event",
+        });
+    }
+  }
+
   static async updateEvent(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      const updates = req.body;
+      const userId = req.user?.id;
 
-      const existing = await prisma.event.findUnique({ where: { id } });
-      if (!existing) {
-        return res.status(404).json({
-          success: false,
-          message: "Event not found.",
-        });
+      if (!userId) {
+        return res
+          .status(401)
+          .json({ success: false, message: "Unauthorized" });
       }
 
-      // Recalculate status based on updated dates
-      const now = new Date();
-      const start = updates.startDate
-        ? new Date(updates.startDate)
-        : existing.startDate;
-      const end = updates.endDate
-        ? new Date(updates.endDate)
-        : existing.endDate;
+      const existingEvent = await prisma.event.findUnique({ where: { id } });
 
-      let status = existing.status;
-      if (now >= start && now <= end) status = "ONGOING";
-      else if (now < start) status = "UPCOMING";
-      else if (now > end) status = "COMPLETED";
+      if (!existingEvent) {
+        return res
+          .status(404)
+          .json({ success: false, message: "Event not found" });
+      }
 
-      const updatedEvent = await prisma.event.update({
+      const {
+        title,
+        description,
+        coverImage,
+        location,
+        eventType,
+        startDate,
+        endDate,
+        registrationDeadline,
+        maxAttendees,
+        categoryId,
+        status,
+      } = req.body;
+
+      let newSlug = existingEvent.slug;
+      if (title && title !== existingEvent.title) {
+        newSlug =
+          title
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/(^-|-$)/g, "") +
+          "-" +
+          Date.now();
+      }
+
+      const updateData: any = {};
+      if (title) updateData.title = title;
+      if (title) updateData.slug = newSlug;
+      if (description) updateData.description = description;
+      if (coverImage !== undefined) updateData.coverImage = coverImage || null;
+      if (location) updateData.location = location;
+      if (eventType) updateData.eventType = eventType;
+      if (startDate) updateData.startDate = new Date(startDate);
+      if (endDate) updateData.endDate = new Date(endDate);
+      if (registrationDeadline !== undefined)
+        updateData.registrationDeadline = registrationDeadline
+          ? new Date(registrationDeadline)
+          : null;
+      if (maxAttendees !== undefined)
+        updateData.maxAttendees = maxAttendees ? parseInt(maxAttendees) : null;
+      if (categoryId !== undefined) updateData.categoryId = categoryId || null;
+      if (status) updateData.status = status;
+
+      const event = await prisma.event.update({
         where: { id },
-        data: {
-          ...updates,
-          startDate: start,
-          endDate: end,
-          status,
-        },
+        data: updateData,
         include: {
+          createdBy: {
+            select: { id: true, name: true, studentId: true, image: true },
+          },
           category: true,
-          createdBy: { select: { id: true, name: true, role: true } },
+          _count: { select: { registrations: true } },
         },
       });
 
-      return res.status(200).json({
-        success: true,
-        message: "Event updated successfully.",
-        data: updatedEvent,
+      await prisma.activity.create({
+        data: {
+          userId,
+          action: "UPDATE_EVENT",
+          entity: "Event",
+          entityId: event.id,
+          description: `Updated event: ${event.title}`,
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent") || null,
+        },
       });
+
+      return res
+        .status(200)
+        .json({
+          success: true,
+          message: "Event updated successfully",
+          data: { event },
+        });
     } catch (error) {
       console.error("Update event error:", error);
-      return res.status(500).json({
-        success: false,
-        message: "Failed to update event.",
-      });
+      return res
+        .status(500)
+        .json({
+          success: false,
+          message: "An error occurred while updating the event",
+        });
     }
   }
 
-  // ✅ 5. Soft delete event (Admin / Super Admin)
   static async deleteEvent(req: Request, res: Response) {
     try {
       const { id } = req.params;
+      const userId = req.user?.id;
 
-      const event = await prisma.event.findUnique({ where: { id } });
-      if (!event) {
-        return res.status(404).json({
-          success: false,
-          message: "Event not found.",
-        });
+      if (!userId) {
+        return res
+          .status(401)
+          .json({ success: false, message: "Unauthorized" });
       }
 
-      // Soft delete → mark as CANCELLED instead of removing
-      const cancelledEvent = await prisma.event.update({
+      const event = await prisma.event.findUnique({ where: { id } });
+
+      if (!event) {
+        return res
+          .status(404)
+          .json({ success: false, message: "Event not found" });
+      }
+
+      await prisma.event.delete({ where: { id } });
+
+      await prisma.activity.create({
+        data: {
+          userId,
+          action: "DELETE_EVENT",
+          entity: "Event",
+          entityId: id,
+          description: `Deleted event: ${event.title}`,
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent") || null,
+        },
+      });
+
+      return res
+        .status(200)
+        .json({ success: true, message: "Event deleted successfully" });
+    } catch (error) {
+      console.error("Delete event error:", error);
+      return res
+        .status(500)
+        .json({
+          success: false,
+          message: "An error occurred while deleting the event",
+        });
+    }
+  }
+
+  static async registerForEvent(req: Request, res: Response) {
+    try {
+      const { eventId } = req.body;
+      const userId = req.user?.id;
+
+      if (!userId) {
+        return res
+          .status(401)
+          .json({ success: false, message: "Unauthorized" });
+      }
+
+      if (!eventId) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Event ID is required" });
+      }
+
+      const event = await prisma.event.findUnique({
+        where: { id: eventId },
+        include: { _count: { select: { registrations: true } } },
+      });
+
+      if (!event) {
+        return res
+          .status(404)
+          .json({ success: false, message: "Event not found" });
+      }
+
+      if (
+        event.registrationDeadline &&
+        new Date() > new Date(event.registrationDeadline)
+      ) {
+        return res
+          .status(400)
+          .json({
+            success: false,
+            message: "Registration deadline has passed",
+          });
+      }
+
+      if (
+        event.maxAttendees &&
+        event._count.registrations >= event.maxAttendees
+      ) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Event is full" });
+      }
+
+      const existingRegistration = await prisma.eventRegistration.findUnique({
+        where: { eventId_userId: { eventId, userId } },
+      });
+
+      if (existingRegistration) {
+        return res
+          .status(409)
+          .json({
+            success: false,
+            message: "You are already registered for this event",
+          });
+      }
+
+      const registration = await prisma.eventRegistration.create({
+        data: { eventId, userId },
+        include: {
+          event: {
+            select: { id: true, title: true, startDate: true, location: true },
+          },
+          user: {
+            select: { id: true, name: true, studentId: true, email: true },
+          },
+        },
+      });
+
+      await prisma.activity.create({
+        data: {
+          userId,
+          action: "REGISTER_EVENT",
+          entity: "EventRegistration",
+          entityId: registration.id,
+          description: `Registered for event: ${event.title}`,
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent") || null,
+        },
+      });
+
+      return res
+        .status(201)
+        .json({
+          success: true,
+          message: "Successfully registered for event",
+          data: { registration },
+        });
+    } catch (error) {
+      console.error("Register for event error:", error);
+      return res
+        .status(500)
+        .json({
+          success: false,
+          message: "An error occurred while registering for the event",
+        });
+    }
+  }
+
+  static async cancelRegistration(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      const userId = req.user?.id;
+      const userRole = req.user?.role;
+
+      if (!userId) {
+        return res
+          .status(401)
+          .json({ success: false, message: "Unauthorized" });
+      }
+
+      const registration = await prisma.eventRegistration.findUnique({
         where: { id },
-        data: { status: "CANCELLED" },
+        include: { event: true },
+      });
+
+      if (!registration) {
+        return res
+          .status(404)
+          .json({ success: false, message: "Registration not found" });
+      }
+
+      if (
+        userRole !== "ADMIN" &&
+        userRole !== "SUPER_ADMIN" &&
+        registration.userId !== userId
+      ) {
+        return res
+          .status(403)
+          .json({
+            success: false,
+            message: "You do not have permission to cancel this registration",
+          });
+      }
+
+      await prisma.eventRegistration.delete({ where: { id } });
+
+      await prisma.activity.create({
+        data: {
+          userId,
+          action: "CANCEL_REGISTRATION",
+          entity: "EventRegistration",
+          entityId: id,
+          description: `Cancelled registration for event: ${registration.event.title}`,
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent") || null,
+        },
+      });
+
+      return res
+        .status(200)
+        .json({
+          success: true,
+          message: "Registration cancelled successfully",
+        });
+    } catch (error) {
+      console.error("Cancel registration error:", error);
+      return res
+        .status(500)
+        .json({
+          success: false,
+          message: "An error occurred while cancelling the registration",
+        });
+    }
+  }
+
+  static async updateAttendanceStatus(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      const { status } = req.body;
+      const userId = req.user?.id;
+
+      if (!userId) {
+        return res
+          .status(401)
+          .json({ success: false, message: "Unauthorized" });
+      }
+
+      if (!["REGISTERED", "ATTENDED", "CANCELLED"].includes(status)) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Invalid status" });
+      }
+
+      const registration = await prisma.eventRegistration.findUnique({
+        where: { id },
+      });
+
+      if (!registration) {
+        return res
+          .status(404)
+          .json({ success: false, message: "Registration not found" });
+      }
+
+      const updatedRegistration = await prisma.eventRegistration.update({
+        where: { id },
+        data: { status },
+        include: {
+          user: {
+            select: { id: true, name: true, studentId: true, email: true },
+          },
+          event: { select: { id: true, title: true } },
+        },
+      });
+
+      await prisma.activity.create({
+        data: {
+          userId,
+          action: "UPDATE_ATTENDANCE",
+          entity: "EventRegistration",
+          entityId: id,
+          description: `Updated attendance status to ${status}`,
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent") || null,
+        },
+      });
+
+      return res
+        .status(200)
+        .json({
+          success: true,
+          message: "Attendance status updated",
+          data: { registration: updatedRegistration },
+        });
+    } catch (error) {
+      console.error("Update attendance error:", error);
+      return res
+        .status(500)
+        .json({
+          success: false,
+          message: "An error occurred while updating attendance status",
+        });
+    }
+  }
+
+  static async getEventStats(req: Request, res: Response) {
+    try {
+      const totalEvents = await prisma.event.count();
+      const upcomingEvents = await prisma.event.count({
+        where: { status: "UPCOMING" },
+      });
+      const ongoingEvents = await prisma.event.count({
+        where: { status: "ONGOING" },
+      });
+      const completedEvents = await prisma.event.count({
+        where: { status: "COMPLETED" },
+      });
+      const totalRegistrations = await prisma.eventRegistration.count();
+
+      const eventsWithCounts = await prisma.event.findMany({
+        select: {
+          id: true,
+          title: true,
+          slug: true,
+          startDate: true,
+          _count: { select: { registrations: true } },
+        },
+        orderBy: { registrations: { _count: "desc" } },
+        take: 5,
+      });
+
+      const recentEvents = await prisma.event.findMany({
+        take: 5,
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          title: true,
+          slug: true,
+          status: true,
+          startDate: true,
+          createdAt: true,
+          createdBy: { select: { name: true, studentId: true } },
+        },
       });
 
       return res.status(200).json({
         success: true,
-        message: "Event cancelled (soft deleted) successfully.",
-        data: cancelledEvent,
+        data: {
+          stats: {
+            totalEvents,
+            upcomingEvents,
+            ongoingEvents,
+            completedEvents,
+            totalRegistrations,
+          },
+          mostPopularEvents: eventsWithCounts,
+          recentEvents,
+        },
       });
     } catch (error) {
-      console.error("Delete event error:", error);
-      return res.status(500).json({
-        success: false,
-        message: "Failed to delete event.",
-      });
+      console.error("Get event stats error:", error);
+      return res
+        .status(500)
+        .json({
+          success: false,
+          message: "An error occurred while fetching event statistics",
+        });
     }
   }
 
-  // ✅ 6. RSVP to an event (Authenticated Users)
-  static async registerForEvent(req: Request, res: Response) {
+  static async getMyRegistrations(req: Request, res: Response) {
     try {
-      const { id } = req.params;
-      const userId = req.user.id;
+      const userId = req.user?.id;
 
-      const event = await prisma.event.findUnique({
-        where: { id },
-        include: { registrations: true },
-      });
-
-      if (!event) {
-        return res.status(404).json({
-          success: false,
-          message: "Event not found.",
-        });
+      if (!userId) {
+        return res
+          .status(401)
+          .json({ success: false, message: "Unauthorized" });
       }
 
-      // Check registration deadline
-      if (
-        event.registrationDeadline &&
-        new Date() > event.registrationDeadline
-      ) {
-        return res.status(400).json({
-          success: false,
-          message: "Registration deadline has passed.",
-        });
-      }
-
-      // Check duplicates
-      const existing = await prisma.eventRegistration.findUnique({
-        where: { eventId_userId: { eventId: id, userId } },
+      const registrations = await prisma.eventRegistration.findMany({
+        where: { userId },
+        include: {
+          event: {
+            include: {
+              category: true,
+              createdBy: { select: { name: true, studentId: true } },
+              _count: { select: { registrations: true } },
+            },
+          },
+        },
+        orderBy: { createdAt: "desc" },
       });
 
-      if (existing) {
-        return res.status(400).json({
-          success: false,
-          message: "You are already registered for this event.",
-        });
-      }
-
-      const registration = await prisma.eventRegistration.create({
-        data: { eventId: id, userId },
-      });
-
-      return res.status(201).json({
-        success: true,
-        message: "Registered for event successfully.",
-        data: registration,
-      });
+      return res.status(200).json({ success: true, data: { registrations } });
     } catch (error) {
-      console.error("RSVP event error:", error);
-      return res.status(500).json({
-        success: false,
-        message: "Failed to register for event.",
-      });
+      console.error("Get my registrations error:", error);
+      return res
+        .status(500)
+        .json({
+          success: false,
+          message: "An error occurred while fetching your registrations",
+        });
     }
   }
 }

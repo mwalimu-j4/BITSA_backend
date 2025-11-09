@@ -4,46 +4,63 @@ import { AuthMiddleware } from "../middlewares/auth.middleware";
 
 const router = Router();
 
-/**
- * ==========================================================
- * 🧭 EVENT MANAGEMENT ROUTES
- * ==========================================================
- * Only Admin and Super Admin can perform CRUD actions.
- * All users (authenticated or not) can view events.
- * ==========================================================
- */
-
-// ✅ Public routes
-router.get("/", EventController.getAllEvents); // Fetch all events (filters supported)
-router.get("/:id", EventController.getEventById); // Get specific event details
-
-// ✅ Authenticated users — RSVP registration
-router.post(
-  "/:id/register",
+router.get("/", AuthMiddleware.optionalAuth, EventController.getAllEvents);
+router.get(
+  "/stats",
   AuthMiddleware.authenticate,
-  EventController.registerForEvent
+  AuthMiddleware.authorize("ADMIN", "SUPER_ADMIN"),
+  EventController.getEventStats
 );
-
-// ✅ Admin / Super Admin routes — Create, Update, Soft Delete
+router.get(
+  "/my-registrations",
+  AuthMiddleware.authenticate,
+  EventController.getMyRegistrations
+);
+router.get(
+  "/id/:id",
+  AuthMiddleware.authenticate,
+  AuthMiddleware.authorize("ADMIN", "SUPER_ADMIN"),
+  EventController.getEventById
+);
+router.get(
+  "/:slug",
+  AuthMiddleware.optionalAuth,
+  EventController.getEventBySlug
+);
 router.post(
   "/",
   AuthMiddleware.authenticate,
   AuthMiddleware.authorize("ADMIN", "SUPER_ADMIN"),
   EventController.createEvent
 );
-
 router.put(
   "/:id",
   AuthMiddleware.authenticate,
   AuthMiddleware.authorize("ADMIN", "SUPER_ADMIN"),
   EventController.updateEvent
 );
-
 router.delete(
   "/:id",
   AuthMiddleware.authenticate,
   AuthMiddleware.authorize("ADMIN", "SUPER_ADMIN"),
   EventController.deleteEvent
 );
+router.post(
+  "/register",
+  AuthMiddleware.authenticate,
+  EventController.registerForEvent
+);
+router.delete(
+  "/registrations/:id",
+  AuthMiddleware.authenticate,
+  EventController.cancelRegistration
+);
+router.patch(
+  "/registrations/:id/attendance",
+  AuthMiddleware.authenticate,
+  AuthMiddleware.authorize("ADMIN", "SUPER_ADMIN"),
+  EventController.updateAttendanceStatus
+);
+
 
 export default router;

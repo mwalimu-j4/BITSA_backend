@@ -3,10 +3,14 @@ import cors from "cors";
 import dotenv from "dotenv";
 import http from "http";
 import chalk from "chalk";
-
-import authRoutes from "./routes/auth.routes"; // Placeholder, assuming this exists
+import authRoutes from "./routes/auth.routes";
 import blogRoutes from "./routes/blog.routes";
 import eventRoutes from "./routes/event.routes";
+import galleryRoutes from "./routes/gallery.routes";
+import { CloudinaryUtil } from "./utils/cloudinary.util";
+import { handleMulterError } from "./middlewares/upload.middleware";
+import studentSettingsRoutes from "./routes/student-settings.routes";
+import adminRoutes from "./routes/admin.routes";
 
 // 🧩 Load environment variables early
 dotenv.config({ path: ".env" });
@@ -23,9 +27,15 @@ app.use(
     credentials: true,
   })
 );
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Configure Cloudinary
+CloudinaryUtil.configure({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME || "",
+  api_key: process.env.CLOUDINARY_API_KEY || "",
+  api_secret: process.env.CLOUDINARY_API_SECRET || "",
+});
 
 // 🧾 Request logging middleware
 app.use((req: Request, res: Response, next: NextFunction) => {
@@ -51,6 +61,11 @@ app.get("/health", (req: Request, res: Response) => {
 app.use("/api/auth", authRoutes);
 app.use("/api", blogRoutes);
 app.use("/api/events", eventRoutes);
+app.use("/api/gallery", galleryRoutes);
+app.use("/api/student", studentSettingsRoutes); // <-- Add this line
+app.use("/api/admin", adminRoutes);
+// Handle multer errors
+app.use(handleMulterError);
 
 // 🚧 404 handler
 app.use((req: Request, res: Response) => {
@@ -81,8 +96,12 @@ ${chalk.green.bold("🚀 BITSA Backend Server Started")}
 ----------------------------------------
 🌍 ${chalk.cyan("URL:")} ${baseUrl}
 🏥 ${chalk.cyan("Health Check:")} ${baseUrl}/health
+🖼️  ${chalk.cyan("Gallery API:")} ${baseUrl}/api/gallery
 🌐 ${chalk.cyan("Frontend CORS:")} ${FRONTEND_URL}
 🧱 ${chalk.cyan("Environment:")} ${process.env.NODE_ENV || "development"}
+☁️  ${chalk.cyan("Cloudinary:")} ${
+    process.env.CLOUDINARY_CLOUD_NAME ? "✅ Configured" : "❌ Not configured"
+  }
 ----------------------------------------
   `);
 });
@@ -91,6 +110,18 @@ ${chalk.green.bold("🚀 BITSA Backend Server Started")}
 process.on("SIGINT", () => {
   console.log(chalk.yellow("👋 Server shutting down gracefully..."));
   server.close(() => process.exit(0));
+});
+
+// Handle unhandled promise rejections
+process.on("unhandledRejection", (err: Error) => {
+  console.error(chalk.red("Unhandled Rejection:"), err);
+  process.exit(1);
+});
+
+// Handle uncaught exceptions
+process.on("uncaughtException", (err: Error) => {
+  console.error(chalk.red("Uncaught Exception:"), err);
+  process.exit(1);
 });
 
 export default app;
