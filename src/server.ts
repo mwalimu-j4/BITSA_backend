@@ -16,31 +16,42 @@ import adminRoutes from "./routes/admin.routes";
 
 import { CloudinaryUtil } from "./utils/cloudinary.util";
 import { handleMulterError } from "./middlewares/upload.middleware";
-
-// ✅ Prisma Client
 import { PrismaClient } from "@prisma/client";
 
-// 🧩 Load environment variables
+// Load environment variables
 dotenv.config({ path: ".env" });
 
 const prisma = new PrismaClient();
-
 const app = express();
 
-// ✅ Use Render-assigned PORT (never hardcode)
 const PORT = process.env.PORT ? Number(process.env.PORT) : 5000;
 const HOST = process.env.HOST || "0.0.0.0";
-const FRONTEND_URL =
-  process.env.FRONTEND_URL || "https://bitsa-frontend.vercel.app";
 const NODE_ENV = process.env.NODE_ENV || "production";
 
-// 🛡️ Security + performance middleware
-app.use(helmet());
+// Allowed origins - more robust handling
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  "http://localhost:5173",
+  "http://localhost:3000",
+  "http://localhost:5174",
+  "https://bitsa-frontend.vercel.app",
+].filter((origin): origin is string => Boolean(origin));
+
+console.log(chalk.blue("🌐 Allowed CORS origins:"), allowedOrigins);
+console.log(chalk.blue("📦 Environment:"), NODE_ENV);
+
+// Security + performance middleware
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" },
+  })
+);
 app.use(compression());
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-// 🪵 Request logging (less noisy in production)
+// Logging
 if (NODE_ENV !== "production") {
   app.use(
     morgan("dev", {
@@ -49,45 +60,113 @@ if (NODE_ENV !== "production") {
   );
 }
 
-// 🌐 CORS configuration
+// backend/src/index.ts
+// Find the CORS middleware section and replace it with this:
+
+// CORS middleware with improved mobile support
 app.use(
   cors({
-    origin: [FRONTEND_URL],
+    origin: (origin, callback) => {
+      // Allow requests with no origin (mobile apps, Postman, etc.)
+      if (!origin) {
+        console.log(
+          chalk.gray("✓ Allowing request with no origin (mobile/app)")
+        );
+        return callback(null, true);
+      }
+
+      // Check if origin is in allowed list
+      if (allowedOrigins.includes(origin)) {
+        console.log(chalk.green(`✓ Allowed CORS from: ${origin}`));
+        return callback(null, true);
+      }
+
+      // For development: Allow any localhost/127.0.0.1 origin
+      if (
+        NODE_ENV === "development" &&
+        (origin.includes("localhost") || origin.includes("127.0.0.1"))
+      ) {
+        console.log(chalk.cyan(`✓ Dev mode - allowing: ${origin}`));
+        return callback(null, true);
+      }
+
+      // Block unauthorized origins
+      console.warn(chalk.yellow(`⚠️  Blocked CORS request from: ${origin}`));
+      console.warn(
+        chalk.yellow(`   Allowed origins: ${allowedOrigins.join(", ")}`)
+      );
+
+      const error = new Error(`CORS policy: Origin ${origin} is not allowed`);
+      callback(error);
+    },
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "X-Requested-With",
+      "Accept",
+      "Origin",
+      "User-Agent",
+    ],
+    exposedHeaders: ["Authorization"],
+    maxAge: 86400,
+    preflightContinue: false,
+    optionsSuccessStatus: 204,
   })
 );
 
-// ☁️ Configure Cloudinary
+// Additional middleware to log all requests for debugging
+app.use((req: Request, res: Response, next: NextFunction) => {
+  if (req.method === "OPTIONS") {
+    console.log(
+      chalk.blue("🔍 OPTIONS request from:"),
+      req.headers.origin || "no origin"
+    );
+    console.log(chalk.blue("   Path:"), req.path);
+  }
+  next();
+});
+
+// Cloudinary configuration
 CloudinaryUtil.configure({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME || "",
   api_key: process.env.CLOUDINARY_API_KEY || "",
   api_secret: process.env.CLOUDINARY_API_SECRET || "",
 });
 
-// 🏥 Health check endpoint
+// Health check endpoint
 app.get("/health", (_req: Request, res: Response) => {
   res.status(200).json({
     success: true,
     message: "✅ BITSA Backend API is running successfully",
     environment: NODE_ENV,
     timestamp: new Date().toISOString(),
+    cors: {
+      allowedOrigins: allowedOrigins,
+    },
   });
 });
 
-// 🔗 DB Test endpoint (optional)
+// Database test endpoint
 app.get("/api/db-test", async (_req: Request, res: Response) => {
   try {
     const users = await prisma.user.findMany({ take: 1 });
-    res.json({ success: true, users });
+    res.json({
+      success: true,
+      message: "Database connection successful",
+      userCount: users.length,
+    });
   } catch (err: any) {
     console.error(chalk.red("🔥 DB Connection Error:"), err.message);
-    res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({
+      success: false,
+      error: err.message,
+    });
   }
 });
 
-// 🚪 API Routes
+// API Routes
 app.use("/api/auth", authRoutes);
 app.use("/api", blogRoutes);
 app.use("/api/events", eventRoutes);
@@ -95,31 +174,49 @@ app.use("/api/gallery", galleryRoutes);
 app.use("/api/student", studentSettingsRoutes);
 app.use("/api/admin", adminRoutes);
 
-// 🧩 File upload error handling
+// File upload error handling
 app.use(handleMulterError);
 
-// 🚧 404 Handler
+// 404 Handler
 app.use((req: Request, res: Response) => {
+  console.log(
+    chalk.yellow(`❌ 404 - Route not found: ${req.method} ${req.url}`)
+  );
   res.status(404).json({
     success: false,
     message: "❌ Route not found",
+    path: req.url,
+    method: req.method,
   });
 });
 
-// 💥 Global Error Handler
-app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-  console.error(chalk.red("🔥 Global error:"), err);
-  res.status(500).json({
+// Global Error Handler
+app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
+  console.error(chalk.red("🔥 Global error:"), err.message);
+  console.error(chalk.red("   Path:"), req.url);
+  console.error(chalk.red("   Method:"), req.method);
+
+  // Handle CORS errors specifically
+  if (err.message && err.message.includes("CORS policy")) {
+    return res.status(403).json({
+      success: false,
+      message: "CORS policy error",
+      error: NODE_ENV === "development" ? err.message : "Origin not allowed",
+      allowedOrigins: NODE_ENV === "development" ? allowedOrigins : undefined,
+    });
+  }
+
+  res.status(err.status || 500).json({
     success: false,
-    message: "Internal server error",
-    error: NODE_ENV === "development" ? err.message : undefined,
+    message: err.message || "Internal server error",
+    error: NODE_ENV === "development" ? err.stack : undefined,
   });
 });
 
-// 🚀 Start server
+// Start server
 const server = http.createServer(app);
 
-// Test DB connection at startup
+// Connect to database
 (async () => {
   try {
     await prisma.$connect();
@@ -130,36 +227,57 @@ const server = http.createServer(app);
   }
 })();
 
+// Start listening
 server.listen(PORT, HOST, () => {
   const baseUrl =
     HOST === "0.0.0.0" ? `http://localhost:${PORT}` : `http://${HOST}:${PORT}`;
   console.log(`
 ${chalk.green.bold("🚀 BITSA Backend Server Started")}
 ----------------------------------------
-🌍 ${chalk.cyan("URL:")} ${baseUrl}
-🏥 ${chalk.cyan("Health Check:")} ${baseUrl}/health
-🖼️ ${chalk.cyan("Gallery API:")} ${baseUrl}/api/gallery
-🌐 ${chalk.cyan("CORS Allowed:")} ${FRONTEND_URL}
-🧱 ${chalk.cyan("Environment:")} ${NODE_ENV}
-☁️ ${chalk.cyan("Cloudinary:")} ${
+🌍 URL: ${baseUrl}
+🏥 Health Check: ${baseUrl}/health
+🔐 Auth API: ${baseUrl}/api/auth
+📝 Blog API: ${baseUrl}/api/blogs
+🎉 Events API: ${baseUrl}/api/events
+🖼️ Gallery API: ${baseUrl}/api/gallery
+🌐 CORS Allowed: ${allowedOrigins.join(", ")}
+🧱 Environment: ${NODE_ENV}
+☁️ Cloudinary: ${
     process.env.CLOUDINARY_CLOUD_NAME ? "✅ Configured" : "❌ Missing"
   }
 ----------------------------------------
   `);
 });
 
-// 🧹 Graceful shutdown
-process.on("SIGINT", () => {
-  console.log(chalk.yellow("👋 Server shutting down gracefully..."));
-  server.close(() => process.exit(0));
+// Graceful shutdown
+process.on("SIGINT", async () => {
+  console.log(chalk.yellow("\n👋 Server shutting down gracefully..."));
+  await prisma.$disconnect();
+  server.close(() => {
+    console.log(chalk.green("✅ Server closed"));
+    process.exit(0);
+  });
+});
+
+process.on("SIGTERM", async () => {
+  console.log(
+    chalk.yellow("\n👋 SIGTERM received, shutting down gracefully...")
+  );
+  await prisma.$disconnect();
+  server.close(() => {
+    console.log(chalk.green("✅ Server closed"));
+    process.exit(0);
+  });
 });
 
 process.on("unhandledRejection", (err: any) => {
-  console.error(chalk.red("Unhandled Rejection:"), err);
+  console.error(chalk.red("❌ Unhandled Rejection:"), err);
+  console.error(err.stack);
 });
 
 process.on("uncaughtException", (err: any) => {
-  console.error(chalk.red("Uncaught Exception:"), err);
+  console.error(chalk.red("❌ Uncaught Exception:"), err);
+  console.error(err.stack);
   process.exit(1);
 });
 
