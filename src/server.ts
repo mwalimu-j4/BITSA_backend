@@ -17,8 +17,13 @@ import adminRoutes from "./routes/admin.routes";
 import { CloudinaryUtil } from "./utils/cloudinary.util";
 import { handleMulterError } from "./middlewares/upload.middleware";
 
+// ✅ Prisma Client
+import { PrismaClient } from "@prisma/client";
+
 // 🧩 Load environment variables
 dotenv.config({ path: ".env" });
+
+const prisma = new PrismaClient();
 
 const app = express();
 
@@ -30,8 +35,8 @@ const FRONTEND_URL =
 const NODE_ENV = process.env.NODE_ENV || "production";
 
 // 🛡️ Security + performance middleware
-app.use(helmet()); // Sets secure HTTP headers
-app.use(compression()); // Gzip responses
+app.use(helmet());
+app.use(compression());
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
@@ -47,7 +52,7 @@ if (NODE_ENV !== "production") {
 // 🌐 CORS configuration
 app.use(
   cors({
-    origin: [FRONTEND_URL], // Restrict only to your frontend domain
+    origin: [FRONTEND_URL],
     credentials: true,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
@@ -69,6 +74,17 @@ app.get("/health", (_req: Request, res: Response) => {
     environment: NODE_ENV,
     timestamp: new Date().toISOString(),
   });
+});
+
+// 🔗 DB Test endpoint (optional)
+app.get("/api/db-test", async (_req: Request, res: Response) => {
+  try {
+    const users = await prisma.users.findMany({ take: 1 });
+    res.json({ success: true, users });
+  } catch (err: any) {
+    console.error(chalk.red("🔥 DB Connection Error:"), err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 // 🚪 API Routes
@@ -102,6 +118,18 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
 
 // 🚀 Start server
 const server = http.createServer(app);
+
+// Test DB connection at startup
+(async () => {
+  try {
+    await prisma.$connect();
+    console.log(chalk.green("✅ Connected to Neon database successfully"));
+  } catch (err: any) {
+    console.error(chalk.red("❌ Failed to connect to Neon DB:"), err.message);
+    process.exit(1);
+  }
+})();
+
 server.listen(PORT, HOST, () => {
   const baseUrl =
     HOST === "0.0.0.0" ? `http://localhost:${PORT}` : `http://${HOST}:${PORT}`;
