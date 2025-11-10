@@ -79,7 +79,7 @@ app.get("/health", (_req: Request, res: Response) => {
 // 🔗 DB Test endpoint (optional)
 app.get("/api/db-test", async (_req: Request, res: Response) => {
   try {
-    const users = await prisma.users.findMany({ take: 1 });
+    const users = await prisma.user.findMany({ take: 1 });
     res.json({ success: true, users });
   } catch (err: any) {
     console.error(chalk.red("🔥 DB Connection Error:"), err.message);
