@@ -5,8 +5,9 @@
   "main": "index.js",
   "scripts": {
     "dev": "nodemon --exec tsx src/server.ts",
-    "build": "tsc",
     "start": "node dist/server.js",
+    "prebuild": "prisma generate",
+    "build": "tsc",
     "prisma:generate": "dotenv -e .env -- prisma generate",
     "prisma:migrate": "dotenv -e .env -- prisma migrate dev",
     "prisma:migrate:deploy": "dotenv -e .env -- prisma migrate deploy",
@@ -29,6 +30,7 @@
     "@types/node": "^24.10.0",
     "@types/nodemailer": "^7.0.3",
     "@types/streamifier": "^0.1.2",
+    "cross-env": "^10.1.0",
     "dotenv-cli": "^11.0.0",
     "nodemon": "^3.1.10",
     "prisma": "^6.19.0",
