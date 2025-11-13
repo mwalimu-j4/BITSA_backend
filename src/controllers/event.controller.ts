@@ -15,6 +15,8 @@ export class EventController {
         registrationDeadline,
         maxAttendees,
         categoryId,
+        published = false,
+        requiresRegistration = false,
       } = req.body;
       const userId = req.user?.id;
 
@@ -32,13 +34,11 @@ export class EventController {
         !startDate ||
         !endDate
       ) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message:
-              "Title, description, location, event type, start date, and end date are required",
-          });
+        return res.status(400).json({
+          success: false,
+          message:
+            "Title, description, location, event type, start date, and end date are required",
+        });
       }
 
       const slug =
@@ -65,6 +65,9 @@ export class EventController {
           maxAttendees: maxAttendees ? parseInt(maxAttendees) : null,
           createdById: userId,
           categoryId: categoryId || null,
+          published,
+          publishedAt: published ? new Date() : null,
+          requiresRegistration,
         },
         include: {
           createdBy: {
@@ -78,30 +81,94 @@ export class EventController {
       await prisma.activity.create({
         data: {
           userId,
-          action: "CREATE_EVENT",
+          action: published ? "PUBLISH_EVENT" : "CREATE_EVENT",
           entity: "Event",
           entityId: event.id,
-          description: `Created event: ${title}`,
+          description: `${
+            published ? "Published" : "Created draft"
+          } event: ${title}`,
           ipAddress: req.ip,
           userAgent: req.get("user-agent") || null,
         },
       });
 
-      return res
-        .status(201)
-        .json({
-          success: true,
-          message: "Event created successfully",
-          data: { event },
-        });
+      return res.status(201).json({
+        success: true,
+        message: `Event ${
+          published ? "published" : "saved as draft"
+        } successfully`,
+        data: { event },
+      });
     } catch (error) {
       console.error("Create event error:", error);
-      return res
-        .status(500)
-        .json({
-          success: false,
-          message: "An error occurred while creating the event",
-        });
+      return res.status(500).json({
+        success: false,
+        message: "An error occurred while creating the event",
+      });
+    }
+  }
+
+  static async togglePublish(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      const userId = req.user?.id;
+
+      if (!userId) {
+        return res
+          .status(401)
+          .json({ success: false, message: "Unauthorized" });
+      }
+
+      const event = await prisma.event.findUnique({ where: { id } });
+
+      if (!event) {
+        return res
+          .status(404)
+          .json({ success: false, message: "Event not found" });
+      }
+
+      const updatedEvent = await prisma.event.update({
+        where: { id },
+        data: {
+          published: !event.published,
+          publishedAt: !event.published ? new Date() : null,
+        },
+        include: {
+          createdBy: {
+            select: { id: true, name: true, studentId: true, image: true },
+          },
+          category: true,
+          _count: { select: { registrations: true } },
+        },
+      });
+
+      await prisma.activity.create({
+        data: {
+          userId,
+          action: updatedEvent.published ? "PUBLISH_EVENT" : "UNPUBLISH_EVENT",
+          entity: "Event",
+          entityId: event.id,
+          description: `${
+            updatedEvent.published ? "Published" : "Unpublished"
+          } event: ${event.title}`,
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent") || null,
+        },
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: `Event ${
+          updatedEvent.published ? "published" : "unpublished"
+        } successfully`,
+        data: { event: updatedEvent },
+      });
+    } catch (error) {
+      console.error("Toggle publish error:", error);
+      return res.status(500).json({
+        success: false,
+        message: "An error occurred while updating the event",
+      });
     }
   }
 
@@ -112,6 +179,7 @@ export class EventController {
         categoryId,
         eventType,
         status,
+        published,
         page = 1,
         limit = 10,
         sortBy = "startDate",
@@ -120,6 +188,17 @@ export class EventController {
 
       const skip = (parseInt(page) - 1) * parseInt(limit);
       const where: any = {};
+
+      // Only show published events to non-admin users
+      const isAdmin =
+        req.user?.role === "ADMIN" || req.user?.role === "SUPER_ADMIN";
+      if (!isAdmin && published !== "false") {
+        where.published = true;
+      } else if (published === "true") {
+        where.published = true;
+      } else if (published === "false") {
+        where.published = false;
+      }
 
       if (search) {
         where.OR = [
@@ -145,7 +224,12 @@ export class EventController {
             select: { id: true, name: true, studentId: true, image: true },
           },
           category: true,
-          _count: { select: { registrations: true, gallery: true } },
+          _count: {
+            select: {
+              registrations: true,
+              gallery: true,
+            },
+          },
         },
       });
 
@@ -163,12 +247,10 @@ export class EventController {
       });
     } catch (error) {
       console.error("Get all events error:", error);
-      return res
-        .status(500)
-        .json({
-          success: false,
-          message: "An error occurred while fetching events",
-        });
+      return res.status(500).json({
+        success: false,
+        message: "An error occurred while fetching events",
+      });
     }
   }
 
@@ -218,12 +300,10 @@ export class EventController {
       return res.status(200).json({ success: true, data: { event } });
     } catch (error) {
       console.error("Get event by ID error:", error);
-      return res
-        .status(500)
-        .json({
-          success: false,
-          message: "An error occurred while fetching the event",
-        });
+      return res.status(500).json({
+        success: false,
+        message: "An error occurred while fetching the event",
+      });
     }
   }
 
@@ -265,12 +345,10 @@ export class EventController {
       return res.status(200).json({ success: true, data: { event } });
     } catch (error) {
       console.error("Get event by slug error:", error);
-      return res
-        .status(500)
-        .json({
-          success: false,
-          message: "An error occurred while fetching the event",
-        });
+      return res.status(500).json({
+        success: false,
+        message: "An error occurred while fetching the event",
+      });
     }
   }
 
@@ -305,6 +383,8 @@ export class EventController {
         maxAttendees,
         categoryId,
         status,
+        published,
+        requiresRegistration,
       } = req.body;
 
       let newSlug = existingEvent.slug;
@@ -335,6 +415,16 @@ export class EventController {
         updateData.maxAttendees = maxAttendees ? parseInt(maxAttendees) : null;
       if (categoryId !== undefined) updateData.categoryId = categoryId || null;
       if (status) updateData.status = status;
+      if (published !== undefined) {
+        updateData.published = published;
+        if (published && !existingEvent.published) {
+          updateData.publishedAt = new Date();
+        } else if (!published) {
+          updateData.publishedAt = null;
+        }
+      }
+      if (requiresRegistration !== undefined)
+        updateData.requiresRegistration = requiresRegistration;
 
       const event = await prisma.event.update({
         where: { id },
@@ -360,21 +450,17 @@ export class EventController {
         },
       });
 
-      return res
-        .status(200)
-        .json({
-          success: true,
-          message: "Event updated successfully",
-          data: { event },
-        });
+      return res.status(200).json({
+        success: true,
+        message: "Event updated successfully",
+        data: { event },
+      });
     } catch (error) {
       console.error("Update event error:", error);
-      return res
-        .status(500)
-        .json({
-          success: false,
-          message: "An error occurred while updating the event",
-        });
+      return res.status(500).json({
+        success: false,
+        message: "An error occurred while updating the event",
+      });
     }
   }
 
@@ -416,12 +502,114 @@ export class EventController {
         .json({ success: true, message: "Event deleted successfully" });
     } catch (error) {
       console.error("Delete event error:", error);
-      return res
-        .status(500)
-        .json({
+      return res.status(500).json({
+        success: false,
+        message: "An error occurred while deleting the event",
+      });
+    }
+  }
+
+  static async simpleRegister(req: Request, res: Response) {
+    try {
+      const { eventId } = req.body;
+      const userId = req.user?.id;
+
+      if (!userId) {
+        return res
+          .status(401)
+          .json({ success: false, message: "Unauthorized" });
+      }
+
+      if (!eventId) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Event ID is required" });
+      }
+
+      const event = await prisma.event.findUnique({
+        where: { id: eventId },
+        include: { _count: { select: { registrations: true } } },
+      });
+
+      if (!event) {
+        return res
+          .status(404)
+          .json({ success: false, message: "Event not found" });
+      }
+
+      // Check if event requires registration form (meaning simple registration is not allowed)
+      if (event.requiresRegistration) {
+        return res.status(400).json({
           success: false,
-          message: "An error occurred while deleting the event",
+          message: "This event requires filling out a registration form",
         });
+      }
+
+      if (
+        event.registrationDeadline &&
+        new Date() > new Date(event.registrationDeadline)
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Registration deadline has passed",
+        });
+      }
+
+      if (
+        event.maxAttendees &&
+        event._count.registrations >= event.maxAttendees
+      ) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Event is full" });
+      }
+
+      const existingRegistration = await prisma.eventRegistration.findUnique({
+        where: { eventId_userId: { eventId, userId } },
+      });
+
+      if (existingRegistration) {
+        return res.status(409).json({
+          success: false,
+          message: "You are already registered for this event",
+        });
+      }
+
+      const registration = await prisma.eventRegistration.create({
+        data: { eventId, userId },
+        include: {
+          event: {
+            select: { id: true, title: true, startDate: true, location: true },
+          },
+          user: {
+            select: { id: true, name: true, studentId: true, email: true },
+          },
+        },
+      });
+
+      await prisma.activity.create({
+        data: {
+          userId,
+          action: "REGISTER_EVENT",
+          entity: "EventRegistration",
+          entityId: registration.id,
+          description: `Registered for event: ${event.title}`,
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent") || null,
+        },
+      });
+
+      return res.status(201).json({
+        success: true,
+        message: "Successfully registered for event",
+        data: { registration },
+      });
+    } catch (error) {
+      console.error("Simple register error:", error);
+      return res.status(500).json({
+        success: false,
+        message: "An error occurred while registering for the event",
+      });
     }
   }
 
@@ -457,12 +645,10 @@ export class EventController {
         event.registrationDeadline &&
         new Date() > new Date(event.registrationDeadline)
       ) {
-        return res
-          .status(400)
-          .json({
-            success: false,
-            message: "Registration deadline has passed",
-          });
+        return res.status(400).json({
+          success: false,
+          message: "Registration deadline has passed",
+        });
       }
 
       if (
@@ -479,12 +665,10 @@ export class EventController {
       });
 
       if (existingRegistration) {
-        return res
-          .status(409)
-          .json({
-            success: false,
-            message: "You are already registered for this event",
-          });
+        return res.status(409).json({
+          success: false,
+          message: "You are already registered for this event",
+        });
       }
 
       const registration = await prisma.eventRegistration.create({
@@ -511,21 +695,17 @@ export class EventController {
         },
       });
 
-      return res
-        .status(201)
-        .json({
-          success: true,
-          message: "Successfully registered for event",
-          data: { registration },
-        });
+      return res.status(201).json({
+        success: true,
+        message: "Successfully registered for event",
+        data: { registration },
+      });
     } catch (error) {
       console.error("Register for event error:", error);
-      return res
-        .status(500)
-        .json({
-          success: false,
-          message: "An error occurred while registering for the event",
-        });
+      return res.status(500).json({
+        success: false,
+        message: "An error occurred while registering for the event",
+      });
     }
   }
 
@@ -557,12 +737,10 @@ export class EventController {
         userRole !== "SUPER_ADMIN" &&
         registration.userId !== userId
       ) {
-        return res
-          .status(403)
-          .json({
-            success: false,
-            message: "You do not have permission to cancel this registration",
-          });
+        return res.status(403).json({
+          success: false,
+          message: "You do not have permission to cancel this registration",
+        });
       }
 
       await prisma.eventRegistration.delete({ where: { id } });
@@ -579,20 +757,16 @@ export class EventController {
         },
       });
 
-      return res
-        .status(200)
-        .json({
-          success: true,
-          message: "Registration cancelled successfully",
-        });
+      return res.status(200).json({
+        success: true,
+        message: "Registration cancelled successfully",
+      });
     } catch (error) {
       console.error("Cancel registration error:", error);
-      return res
-        .status(500)
-        .json({
-          success: false,
-          message: "An error occurred while cancelling the registration",
-        });
+      return res.status(500).json({
+        success: false,
+        message: "An error occurred while cancelling the registration",
+      });
     }
   }
 
@@ -647,21 +821,17 @@ export class EventController {
         },
       });
 
-      return res
-        .status(200)
-        .json({
-          success: true,
-          message: "Attendance status updated",
-          data: { registration: updatedRegistration },
-        });
+      return res.status(200).json({
+        success: true,
+        message: "Attendance status updated",
+        data: { registration: updatedRegistration },
+      });
     } catch (error) {
       console.error("Update attendance error:", error);
-      return res
-        .status(500)
-        .json({
-          success: false,
-          message: "An error occurred while updating attendance status",
-        });
+      return res.status(500).json({
+        success: false,
+        message: "An error occurred while updating attendance status",
+      });
     }
   }
 
@@ -721,12 +891,10 @@ export class EventController {
       });
     } catch (error) {
       console.error("Get event stats error:", error);
-      return res
-        .status(500)
-        .json({
-          success: false,
-          message: "An error occurred while fetching event statistics",
-        });
+      return res.status(500).json({
+        success: false,
+        message: "An error occurred while fetching event statistics",
+      });
     }
   }
 
@@ -757,12 +925,10 @@ export class EventController {
       return res.status(200).json({ success: true, data: { registrations } });
     } catch (error) {
       console.error("Get my registrations error:", error);
-      return res
-        .status(500)
-        .json({
-          success: false,
-          message: "An error occurred while fetching your registrations",
-        });
+      return res.status(500).json({
+        success: false,
+        message: "An error occurred while fetching your registrations",
+      });
     }
   }
 }

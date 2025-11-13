@@ -1,5 +1,3 @@
-// prisma/schema.prisma
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -9,44 +7,35 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-
-// Better Auth required models
 model User {
-  id                 String              @id @default(cuid())
-  studentId          String              @unique  // Primary login identifier
-  email              String              @unique
-  phone              String              @unique
-  password           String              // Hashed password
-  name               String?
-  image              String?
-  emailVerified      Boolean             @default(false)
-  role               Role                @default(STUDENT)
-
-  // Additional profile fields
-  course             String?
-  yearOfStudy        Int?
-  bio                String?
-  isActive           Boolean             @default(true)
-
-  // Password reset
-  resetToken         String?             @unique
-  resetTokenExpiry   DateTime?
-
-  // Timestamps
-  createdAt          DateTime            @default(now())
-  updatedAt          DateTime            @updatedAt
-  lastLoginAt        DateTime?
-
-  // Relations
-  sessions           Session[]
-  accounts           Account[]             // <--- FIX APPLIED HERE
-  blogs              Blog[]
-  comments           Comment[]
-  eventRegistrations EventRegistration[]
-  createdEvents      Event[]               @relation("EventCreator")
-  reactions          Reaction[]
-  notifications      Notification[]
-  activities         Activity[]
+  id                      String                        @id @default(cuid())
+  studentId               String                        @unique
+  email                   String                        @unique
+  phone                   String                        @unique
+  password                String
+  name                    String?
+  image                   String?
+  emailVerified           Boolean                       @default(false)
+  role                    Role                          @default(STUDENT)
+  course                  String?
+  yearOfStudy             Int?
+  bio                     String?
+  isActive                Boolean                       @default(true)
+  resetToken              String?                       @unique
+  resetTokenExpiry        DateTime?
+  createdAt               DateTime                      @default(now())
+  updatedAt               DateTime                      @updatedAt
+  lastLoginAt             DateTime?
+  accounts                Account[]
+  activities              Activity[]
+  blogs                   Blog[]
+  comments                Comment[]
+  eventRegistrations      EventRegistration[]
+  createdEvents           Event[]                       @relation("EventCreator")
+  notifications           Notification[]
+  reactions               Reaction[]
+  sessions                Session[]
+  registrationSubmissions EventRegistrationSubmission[]
 
   @@map("users")
 }
@@ -58,9 +47,9 @@ model Session {
   expiresAt DateTime
   ipAddress String?
   userAgent String?
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("sessions")
 }
@@ -85,43 +74,36 @@ model Account {
 }
 
 model Verification {
-  id          String   @id @default(cuid())
-  identifier  String
-  value       String
-  expiresAt   DateTime
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id         String   @id @default(cuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   @@unique([identifier, value])
   @@map("verifications")
 }
 
-enum Role {
-  STUDENT
-  ADMIN
-  SUPER_ADMIN
-}
-
-// Blog Management
 model Blog {
-  id           String         @id @default(cuid())
-  title        String
-  slug         String         @unique
-  content      String         @db.Text
-  excerpt      String?
-  coverImage   String?
-  published    Boolean        @default(false)
-  publishedAt  DateTime?
-  views        Int            @default(0)
-  authorId     String
-  author       User           @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  categoryId   String?
-  category     Category?      @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  tags         Tag[]
-  comments     Comment[]
-  reactions    Reaction[]
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
+  id          String     @id @default(cuid())
+  title       String
+  slug        String     @unique
+  content     String
+  excerpt     String?
+  coverImage  String?
+  published   Boolean    @default(false)
+  publishedAt DateTime?
+  views       Int        @default(0)
+  authorId    String
+  categoryId  String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  author      User       @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  category    Category?  @relation(fields: [categoryId], references: [id])
+  comments    Comment[]
+  reactions   Reaction[]
+  tags        Tag[]      @relation("BlogToTag")
 
   @@map("blogs")
 }
@@ -131,10 +113,10 @@ model Category {
   name        String   @unique
   slug        String   @unique
   description String?
-  blogs       Blog[]
-  events      Event[]
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  blogs       Blog[]
+  events      Event[]
 
   @@map("categories")
 }
@@ -143,24 +125,24 @@ model Tag {
   id        String   @id @default(cuid())
   name      String   @unique
   slug      String   @unique
-  blogs     Blog[]
   createdAt DateTime @default(now())
+  blogs     Blog[]   @relation("BlogToTag")
 
   @@map("tags")
 }
 
 model Comment {
-  id        String       @id @default(cuid())
-  content   String       @db.Text
+  id        String    @id @default(cuid())
+  content   String
   blogId    String
-  blog      Blog         @relation(fields: [blogId], references: [id], onDelete: Cascade)
   authorId  String
-  author    User         @relation(fields: [authorId], references: [id], onDelete: Cascade)
   parentId  String?
-  parent    Comment?     @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
-  replies   Comment[]    @relation("CommentReplies")
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  author    User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  blog      Blog      @relation(fields: [blogId], references: [id], onDelete: Cascade)
+  parent    Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies   Comment[] @relation("CommentReplies")
 
   @@map("comments")
 }
@@ -169,27 +151,20 @@ model Reaction {
   id        String       @id @default(cuid())
   type      ReactionType
   blogId    String
-  blog      Blog         @relation(fields: [blogId], references: [id], onDelete: Cascade)
   userId    String
-  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt DateTime     @default(now())
+  blog      Blog         @relation(fields: [blogId], references: [id], onDelete: Cascade)
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([blogId, userId])
   @@map("reactions")
 }
 
-enum ReactionType {
-  LIKE
-  LOVE
-  INSIGHTFUL
-}
-
-// Events Management
 model Event {
-  id                   String              @id @default(cuid())
+  id                   String                 @id @default(cuid())
   title                String
-  slug                 String              @unique
-  description          String              @db.Text
+  slug                 String                 @unique
+  description          String
   coverImage           String?
   location             String
   eventType            EventType
@@ -197,17 +172,263 @@ model Event {
   endDate              DateTime
   registrationDeadline DateTime?
   maxAttendees         Int?
-  status               EventStatus         @default(UPCOMING)
+  status               EventStatus            @default(UPCOMING)
   createdById          String
-  createdBy            User                @relation("EventCreator", fields: [createdById], references: [id])
   categoryId           String?
-  category             Category?           @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  registrations        EventRegistration[]
-  gallery              GalleryImage[]
-  createdAt            DateTime            @default(now())
-  updatedAt            DateTime            @updatedAt
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+  registrationForm     EventRegistrationForm?
+ published            Boolean  @default(false)
+  publishedAt          DateTime?
+  requiresRegistration Boolean  @default(false)
+  registrations EventRegistration[]
+  category      Category?           @relation(fields: [categoryId], references: [id])
+  createdBy     User                @relation("EventCreator", fields: [createdById], references: [id])
+  gallery       GalleryImage[]
 
   @@map("events")
+}
+
+model EventRegistration {
+  id        String             @id @default(cuid())
+  eventId   String
+  userId    String
+  status    RegistrationStatus @default(REGISTERED)
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+  event     Event              @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user      User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, userId])
+  @@map("event_registrations")
+}
+
+model GalleryImage {
+  id          String   @id @default(cuid())
+  title       String
+  imageUrl    String
+  description String?
+  eventId     String?
+  albumId     String?
+  uploadedAt  DateTime @default(now())
+  album       Album?   @relation(fields: [albumId], references: [id])
+  event       Event?   @relation(fields: [eventId], references: [id])
+
+  @@map("gallery_images")
+}
+
+model Album {
+  id          String         @id @default(cuid())
+  name        String
+  description String?
+  coverImage  String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  images      GalleryImage[]
+
+  @@map("albums")
+}
+
+model Contact {
+  id        String        @id @default(cuid())
+  name      String
+  email     String
+  subject   String
+  message   String
+  status    ContactStatus @default(UNREAD)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  @@map("contacts")
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  title     String
+  message   String
+  type      NotificationType
+  link      String?
+  read      Boolean          @default(false)
+  createdAt DateTime         @default(now())
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+model Activity {
+  id          String   @id @default(cuid())
+  userId      String
+  action      String
+  entity      String
+  entityId    String
+  description String?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("activities")
+}
+
+model Resource {
+  id          String           @id @default(cuid())
+  title       String
+  description String?
+  fileUrl     String
+  fileType    String
+  fileSize    Int
+  category    ResourceCategory
+  downloads   Int              @default(0)
+  uploadedAt  DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@map("resources")
+}
+
+model Newsletter {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  isActive     Boolean  @default(true)
+  subscribedAt DateTime @default(now())
+
+  @@map("newsletters")
+}
+
+model Setting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt
+
+  @@map("settings")
+}
+
+// Add this new model to your existing schema.prisma file
+
+model ContactPerson {
+  id        String          @id @default(cuid())
+  fullName  String
+  position  ContactPosition
+  email     String
+  phone     String
+  photo     String?
+  bio       String?
+  order     Int             @default(0) // For custom ordering
+  isActive  Boolean         @default(true)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  @@map("contact_persons")
+}
+
+// Add these new models to your existing schema.prisma file
+
+model EventRegistrationForm {
+  id               String                        @id @default(cuid())
+  eventId          String                        @unique
+  requiresApproval Boolean                       @default(false)
+  fields           EventRegistrationField[]
+  submissions      EventRegistrationSubmission[]
+  createdAt        DateTime                      @default(now())
+  updatedAt        DateTime                      @updatedAt
+  event            Event                         @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@map("event_registration_forms")
+}
+
+model EventRegistrationField {
+  id          String                @id @default(cuid())
+  formId      String
+  label       String
+  fieldType   RegistrationFieldType
+  placeholder String?
+  required    Boolean               @default(false)
+  options     String[]              @default([]) // For select, radio, checkbox fields
+  order       Int                   @default(0)
+  validation  String? // JSON string for validation rules
+  createdAt   DateTime              @default(now())
+  form        EventRegistrationForm @relation(fields: [formId], references: [id], onDelete: Cascade)
+
+  @@map("event_registration_fields")
+}
+
+model EventRegistrationSubmission {
+  id                 String                @id @default(cuid())
+  formId             String
+  userId             String
+  eventId            String
+  responses          Json // Store all form responses as JSON
+  status             SubmissionStatus      @default(PENDING)
+  approvedBy         String?
+  approvedAt         DateTime?
+  rejectionReason    String?
+  attended           Boolean               @default(false)
+  attendanceMarkedAt DateTime?
+  attendanceMarkedBy String?
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+  form               EventRegistrationForm @relation(fields: [formId], references: [id], onDelete: Cascade)
+  user               User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([formId, userId])
+  @@map("event_registration_submissions")
+}
+
+// Update the existing Event model to include these new relations:
+// Add these fields to your Event model:
+//   published             Boolean                     @default(false)
+//   publishedAt           DateTime?
+//   requiresRegistration  Boolean                     @default(true)
+//   registrationForm      EventRegistrationForm?
+
+// Add these new enums:
+enum RegistrationFieldType {
+  TEXT
+  EMAIL
+  PHONE
+  NUMBER
+  TEXTAREA
+  SELECT
+  RADIO
+  CHECKBOX
+  DATE
+  FILE
+}
+
+enum SubmissionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  WAITLISTED
+}
+
+// Update User model to include this relation:
+//   registrationSubmissions EventRegistrationSubmission[]
+
+// Add this new enum at the end of your schema file
+enum ContactPosition {
+  PRESIDENT
+  VICE_PRESIDENT
+  SECRETARY
+  TREASURER
+  ORGANIZING_SECRETARY
+  ACADEMIC_SECRETARY
+  ADMIN_STAFF
+  PATRON
+  OTHER
+}
+
+enum Role {
+  STUDENT
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum ReactionType {
+  LIKE
+  LOVE
+  INSIGHTFUL
 }
 
 enum EventType {
@@ -226,85 +447,16 @@ enum EventStatus {
   CANCELLED
 }
 
-model EventRegistration {
-  id        String             @id @default(cuid())
-  eventId   String
-  event     Event              @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  userId    String
-  user      User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  status    RegistrationStatus @default(REGISTERED)
-  createdAt DateTime           @default(now())
-  updatedAt DateTime           @updatedAt
-
-  @@unique([eventId, userId])
-  @@map("event_registrations")
-}
-
 enum RegistrationStatus {
   REGISTERED
   ATTENDED
   CANCELLED
 }
 
-// Gallery Management
-model GalleryImage {
-  id          String   @id @default(cuid())
-  title       String
-  imageUrl    String
-  description String?
-  eventId     String?
-  event       Event?   @relation(fields: [eventId], references: [id], onDelete: SetNull)
-  albumId     String?
-  album       Album?   @relation(fields: [albumId], references: [id], onDelete: SetNull)
-  uploadedAt  DateTime @default(now())
-
-  @@map("gallery_images")
-}
-
-model Album {
-  id          String         @id @default(cuid())
-  name        String
-  description String?
-  coverImage  String?
-  images      GalleryImage[]
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
-
-  @@map("albums")
-}
-
-// Contact & Notifications
-model Contact {
-  id        String        @id @default(cuid())
-  name      String
-  email     String
-  subject   String
-  message   String        @db.Text
-  status    ContactStatus @default(UNREAD)
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
-
-  @@map("contacts")
-}
-
 enum ContactStatus {
   UNREAD
   READ
   REPLIED
-}
-
-model Notification {
-  id        String           @id @default(cuid())
-  userId    String
-  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  title     String
-  message   String
-  type      NotificationType
-  link      String?
-  read      Boolean          @default(false)
-  createdAt DateTime         @default(now())
-
-  @@map("notifications")
 }
 
 enum NotificationType {
@@ -315,62 +467,10 @@ enum NotificationType {
   ANNOUNCEMENT
 }
 
-// Activity Logs
-model Activity {
-  id          String   @id @default(cuid())
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  action      String
-  entity      String
-  entityId    String
-  description String?
-  ipAddress   String?
-  userAgent   String?
-  createdAt   DateTime @default(now())
-
-  @@map("activities")
-}
-
-// Resources
-model Resource {
-  id          String           @id @default(cuid())
-  title       String
-  description String?
-  fileUrl     String
-  fileType    String
-  fileSize    Int
-  category    ResourceCategory
-  downloads   Int              @default(0)
-  uploadedAt  DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
-
-  @@map("resources")
-}
-
 enum ResourceCategory {
   STUDY_MATERIAL
   PAST_PAPER
   NOTES
   DOCUMENTATION
   OTHER
-}
-
-// Newsletter
-model Newsletter {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  isActive     Boolean  @default(true)
-  subscribedAt DateTime @default(now())
-
-  @@map("newsletters")
-}
-
-// Settings/Config
-model Setting {
-  id        String   @id @default(cuid())
-  key       String   @unique
-  value     String   @db.Text
-  updatedAt DateTime @updatedAt
-
-  @@map("settings")
 }
