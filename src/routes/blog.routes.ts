@@ -1,3 +1,4 @@
+// src/routes/index.ts or blog.routes.ts
 import { Router } from "express";
 import { BlogController } from "../controllers/blogs/blog.controller";
 import { CategoryController } from "../controllers/blogs/category.controller";
@@ -7,8 +8,9 @@ import { AuthMiddleware } from "../middlewares/auth.middleware";
 
 const router = Router();
 
-// Blog Routes
-router.get("/blogs", AuthMiddleware.optionalAuth, BlogController.getAllBlogs);
+// Blog Routes - IMPORTANT: Specific routes MUST come before dynamic routes!
+
+// 1. Admin-only specific routes (before :slug)
 router.get(
   "/blogs/stats",
   AuthMiddleware.authenticate,
@@ -16,16 +18,21 @@ router.get(
   BlogController.getBlogStats
 );
 router.get(
-  "/blogs/:slug",
-  AuthMiddleware.optionalAuth,
-  BlogController.getBlogBySlug
-);
-router.get(
   "/blogs/id/:id",
   AuthMiddleware.authenticate,
   AuthMiddleware.authorize("ADMIN", "SUPER_ADMIN"),
   BlogController.getBlogById
-); // NEW
+);
+
+// 2. Public/Student accessible routes
+router.get("/blogs", AuthMiddleware.optionalAuth, BlogController.getAllBlogs);
+
+// 3. Dynamic slug route MUST be last (catches any string)
+router.get(
+  "/blogs/:slug",
+  AuthMiddleware.optionalAuth,
+  BlogController.getBlogBySlug
+);
 router.post(
   "/blogs",
   AuthMiddleware.authenticate,
@@ -51,7 +58,7 @@ router.patch(
   BlogController.togglePublish
 );
 
-// Category Routes (same as before)
+// Category Routes
 router.get("/categories", CategoryController.getAllCategories);
 router.post(
   "/categories",
@@ -72,7 +79,7 @@ router.delete(
   CategoryController.deleteCategory
 );
 
-// Comment Routes (same as before)
+// Comment Routes - Students can add/delete their own comments
 router.get("/comments/blog/:blogId", CommentController.getCommentsByBlog);
 router.post(
   "/comments",
@@ -85,7 +92,7 @@ router.delete(
   CommentController.deleteComment
 );
 
-// Reaction Routes (same as before)
+// Reaction Routes - Students can react to blogs
 router.get(
   "/reactions/blog/:blogId",
   AuthMiddleware.optionalAuth,

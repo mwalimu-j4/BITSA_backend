@@ -1,16 +1,15 @@
 import { PrismaClient } from "@prisma/client";
 import * as dotenv from "dotenv";
 
-// Manually load the environment variables for application runtime.
-// This ensures that your app connects to the right DB based on environment settings.
+// Load environment variables (production or development)
 dotenv.config({ path: ".env.production" });
 
+// Create a single Prisma instance with minimal logging
 const prisma = new PrismaClient({
-  // Only log detailed queries in development for better performance in production.
   log:
     process.env.NODE_ENV === "development"
-      ? ["query", "error", "warn"]
-      : ["error"],
+      ? ["warn", "error"] // ✅ No 'query' logs
+      : ["error"], // ✅ Silent except for actual errors in production
 });
 
 export default prisma;
