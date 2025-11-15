@@ -5,7 +5,6 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-  shadowDatabaseUrl = env("DATABASE_URL")  // Use same DB as shadow
 }
 
 model User {
@@ -38,7 +37,6 @@ model User {
   sessions                Session[]
   registrationSubmissions EventRegistrationSubmission[]
 
-  // ✅ Keep these only (remove "notifications Notification[]")
   notificationsSent    UserNotification[]
   createdNotifications Notification[]     @relation("NotificationCreator")
 
@@ -136,8 +134,6 @@ model Tag {
   @@map("tags")
 }
 
-// Add these fields to your Comment model in schema.prisma
-
 model Comment {
   id            String    @id @default(cuid())
   content       String
@@ -147,9 +143,8 @@ model Comment {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   
-  // ✅ ADD THESE NEW FIELDS FOR SOFT DELETE
-  deletedByUser Boolean   @default(false)  // Track if user soft-deleted
-  deletedAt     DateTime? // When user soft-deleted it
+  deletedByUser Boolean   @default(false)
+  deletedAt     DateTime?
   
   author        User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
   blog          Blog      @relation(fields: [blogId], references: [id], onDelete: Cascade)
@@ -254,7 +249,6 @@ model Contact {
   @@map("contacts")
 }
 
-// Add to your existing schema.prisma
 model Notification {
   id              String               @id @default(cuid())
   title           String
@@ -276,7 +270,6 @@ model Notification {
   createdAt       DateTime             @default(now())
   updatedAt       DateTime             @updatedAt
 
-  // ✅ Relation to UserNotification
   userNotifications UserNotification[]
 
   @@map("notifications")
@@ -297,11 +290,6 @@ model UserNotification {
   @@map("user_notifications")
 }
 
-// Update User model - add these relations:
-// notificationsSent UserNotification[]
-// createdNotifications Notification[] @relation("NotificationCreator")
-
-// Add these enums
 enum NotificationPriority {
   LOW
   MEDIUM
@@ -370,8 +358,6 @@ model Setting {
   @@map("settings")
 }
 
-// Add this new model to your existing schema.prisma file
-
 model ContactPerson {
   id        String          @id @default(cuid())
   fullName  String
@@ -380,15 +366,13 @@ model ContactPerson {
   phone     String
   photo     String?
   bio       String?
-  order     Int             @default(0) // For custom ordering
+  order     Int             @default(0)
   isActive  Boolean         @default(true)
   createdAt DateTime        @default(now())
   updatedAt DateTime        @updatedAt
 
   @@map("contact_persons")
 }
-
-// Add these new models to your existing schema.prisma file
 
 model EventRegistrationForm {
   id               String                        @id @default(cuid())
@@ -410,9 +394,9 @@ model EventRegistrationField {
   fieldType   RegistrationFieldType
   placeholder String?
   required    Boolean               @default(false)
-  options     String[]              @default([]) // For select, radio, checkbox fields
+  options     String[]              @default([])
   order       Int                   @default(0)
-  validation  String? // JSON string for validation rules
+  validation  String?
   createdAt   DateTime              @default(now())
   form        EventRegistrationForm @relation(fields: [formId], references: [id], onDelete: Cascade)
 
@@ -424,7 +408,7 @@ model EventRegistrationSubmission {
   formId             String
   userId             String
   eventId            String
-  responses          Json // Store all form responses as JSON
+  responses          Json
   status             SubmissionStatus      @default(PENDING)
   approvedBy         String?
   approvedAt         DateTime?
@@ -441,14 +425,6 @@ model EventRegistrationSubmission {
   @@map("event_registration_submissions")
 }
 
-// Update the existing Event model to include these new relations:
-// Add these fields to your Event model:
-//   published             Boolean                     @default(false)
-//   publishedAt           DateTime?
-//   requiresRegistration  Boolean                     @default(true)
-//   registrationForm      EventRegistrationForm?
-
-// Add these new enums:
 enum RegistrationFieldType {
   TEXT
   EMAIL
@@ -469,10 +445,6 @@ enum SubmissionStatus {
   WAITLISTED
 }
 
-// Update User model to include this relation:
-//   registrationSubmissions EventRegistrationSubmission[]
-
-// Add this new enum at the end of your schema file
 enum ContactPosition {
   PRESIDENT
   VICE_PRESIDENT
@@ -525,7 +497,6 @@ enum ContactStatus {
   REPLIED
 }
 
-// Update existing NotificationType enum
 enum NotificationType {
   EVENT
   BLOG
