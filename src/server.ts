@@ -20,7 +20,7 @@ import { PrismaClient } from "@prisma/client";
 import uploadRoutes from "./routes/upload.routes";
 import contactRoutes from "./routes/contact.routes";
 import notificationRoutes from "./routes/notification.routes";
-import searchRoutes from "./routes/search.routes";
+// import searchRoutes from "./routes/search.routes";
 // Load environment variables
 dotenv.config({ path: ".env" });
 
@@ -163,7 +163,7 @@ app.use("/api/contacts", contactRoutes);
 app.use(handleMulterError);
 app.use("/api/notifications", notificationRoutes);
 // Global search endpoint
-app.use("/api/search", searchRoutes);
+// app.use("/api/search", searchRoutes);
 // 404 Handler
 app.use((req: Request, res: Response) => {
   console.log(
