@@ -13,15 +13,14 @@ import eventRoutes from "./routes/event.routes";
 import galleryRoutes from "./routes/gallery.routes";
 import studentSettingsRoutes from "./routes/student-settings.routes";
 import adminRoutes from "./routes/admin.routes";
+import uploadRoutes from "./routes/upload.routes";
+import contactRoutes from "./routes/contact.routes";
+import notificationRoutes from "./routes/notification.routes";
 
 import { CloudinaryUtil } from "./utils/cloudinary.util";
 import { handleMulterError } from "./middlewares/upload.middleware";
 import { PrismaClient } from "@prisma/client";
-import uploadRoutes from "./routes/upload.routes";
-import contactRoutes from "./routes/contact.routes";
-import notificationRoutes from "./routes/notification.routes";
-// import searchRoutes from "./routes/search.routes";
-// Load environment variables
+
 dotenv.config({ path: ".env" });
 
 const app = express();
@@ -29,13 +28,13 @@ const PORT = process.env.PORT ? Number(process.env.PORT) : 5000;
 const HOST = process.env.HOST || "0.0.0.0";
 const NODE_ENV = process.env.NODE_ENV || "production";
 
-// ✅ Prisma Client — disable noisy query logs
+// ✅ Prisma Client
 const prisma = new PrismaClient({
   log: NODE_ENV === "development" ? ["warn", "error"] : [],
 });
 
-// Allowed origins
-const allowedOrigins = [
+// Base allowed origins
+const baseAllowedOrigins = [
   process.env.FRONTEND_URL,
   "http://localhost:5173",
   "http://localhost:3000",
@@ -43,7 +42,7 @@ const allowedOrigins = [
   "https://bitsa-frontend.vercel.app",
 ].filter((origin): origin is string => Boolean(origin));
 
-console.log(chalk.blue("🌐 Allowed CORS origins:"), allowedOrigins);
+console.log(chalk.blue("🌐 Base CORS origins:"), baseAllowedOrigins);
 console.log(chalk.blue("📦 Environment:"), NODE_ENV);
 
 // Security + performance middleware
@@ -57,7 +56,7 @@ app.use(compression());
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-// Logging (only basic request logs in development)
+// Logging
 if (NODE_ENV === "development") {
   app.use(
     morgan("dev", {
@@ -66,10 +65,11 @@ if (NODE_ENV === "development") {
   );
 }
 
-// ✅ Improved CORS middleware
+// ✅ IMPROVED CORS - Support Vercel Preview Deployments
 app.use(
   cors({
     origin: (origin, callback) => {
+      // Allow requests with no origin (mobile apps, Postman, curl, etc.)
       if (!origin) {
         console.log(
           chalk.gray("✓ Allowing request with no origin (mobile/app)")
@@ -77,11 +77,19 @@ app.use(
         return callback(null, true);
       }
 
-      if (allowedOrigins.includes(origin)) {
+      // Check if origin is in base allowed origins
+      if (baseAllowedOrigins.includes(origin)) {
         console.log(chalk.green(`✓ Allowed CORS from: ${origin}`));
         return callback(null, true);
       }
 
+      // Allow all Vercel preview deployments (*.vercel.app)
+      if (origin.endsWith(".vercel.app")) {
+        console.log(chalk.cyan(`✓ Allowed Vercel preview: ${origin}`));
+        return callback(null, true);
+      }
+
+      // Allow localhost in development
       if (
         NODE_ENV === "development" &&
         (origin.includes("localhost") || origin.includes("127.0.0.1"))
@@ -90,9 +98,12 @@ app.use(
         return callback(null, true);
       }
 
+      // Block everything else
       console.warn(chalk.yellow(`⚠️  Blocked CORS request from: ${origin}`));
       console.warn(
-        chalk.yellow(`   Allowed origins: ${allowedOrigins.join(", ")}`)
+        chalk.yellow(
+          `   Allowed origins: ${baseAllowedOrigins.join(", ")}, *.vercel.app`
+        )
       );
       callback(new Error(`CORS policy: Origin ${origin} is not allowed`));
     },
@@ -119,15 +130,26 @@ CloudinaryUtil.configure({
   api_secret: process.env.CLOUDINARY_API_SECRET || "",
 });
 
+// ✅ Root route - Health check
+app.get("/", (_req: Request, res: Response) => {
+  res.status(200).json({
+    success: true,
+    message: "✅ BITSA Backend API is running",
+    version: "1.0.0",
+    environment: NODE_ENV,
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // Health check endpoint
 app.get("/health", (_req: Request, res: Response) => {
   res.status(200).json({
     success: true,
-    message: "✅ BITSA Backend API is running successfully",
+    message: "✅ BITSA Backend API is healthy",
     environment: NODE_ENV,
     timestamp: new Date().toISOString(),
     cors: {
-      allowedOrigins,
+      allowedOrigins: [...baseAllowedOrigins, "*.vercel.app"],
     },
   });
 });
@@ -157,13 +179,13 @@ app.use("/api/events", eventRoutes);
 app.use("/api/gallery", galleryRoutes);
 app.use("/api/student", studentSettingsRoutes);
 app.use("/api/admin", adminRoutes);
-app.use("/api/upload", uploadRoutes); // <-- Add this line
+app.use("/api/upload", uploadRoutes);
 app.use("/api/contacts", contactRoutes);
+app.use("/api/notifications", notificationRoutes);
+
 // File upload error handling
 app.use(handleMulterError);
-app.use("/api/notifications", notificationRoutes);
-// Global search endpoint
-// app.use("/api/search", searchRoutes);
+
 // 404 Handler
 app.use((req: Request, res: Response) => {
   console.log(
@@ -174,6 +196,15 @@ app.use((req: Request, res: Response) => {
     message: "❌ Route not found",
     path: req.url,
     method: req.method,
+    availableRoutes: [
+      "GET /",
+      "GET /health",
+      "GET /api/db-test",
+      "POST /api/auth/signup",
+      "POST /api/auth/login",
+      "POST /api/auth/forgot-password",
+      "POST /api/auth/reset-password",
+    ],
   });
 });
 
@@ -188,7 +219,10 @@ app.use((err: any, req: Request, res: Response, _next: NextFunction) => {
       success: false,
       message: "CORS policy error",
       error: NODE_ENV === "development" ? err.message : "Origin not allowed",
-      allowedOrigins: NODE_ENV === "development" ? allowedOrigins : undefined,
+      allowedOrigins:
+        NODE_ENV === "development"
+          ? [...baseAllowedOrigins, "*.vercel.app"]
+          : undefined,
     });
   }
 
@@ -224,7 +258,7 @@ ${chalk.green.bold("🚀 BITSA Backend Server Started")}
 📝 Blog API: ${baseUrl}/api/blogs
 🎉 Events API: ${baseUrl}/api/events
 🖼️ Gallery API: ${baseUrl}/api/gallery
-🌐 CORS Allowed: ${allowedOrigins.join(", ")}
+🌐 CORS Allowed: ${[...baseAllowedOrigins, "*.vercel.app"].join(", ")}
 🧱 Environment: ${NODE_ENV}
 ☁️ Cloudinary: ${
     process.env.CLOUDINARY_CLOUD_NAME ? "✅ Configured" : "❌ Missing"
