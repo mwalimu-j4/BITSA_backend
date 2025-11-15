@@ -1,13 +1,12 @@
 import { Request, Response } from "express";
 import prisma from "../../config/database";
 
-// Note: Assuming `req.user` is extended by the AuthMiddleware to include user data, e.g., req.user.id
 export class ReactionController {
-  // Add/Update Reaction (Authenticated Users)
+  // Toggle Reaction (Authenticated Users)
   static async toggleReaction(req: Request, res: Response) {
     try {
       const { blogId, type } = req.body;
-      const userId = (req as any).user?.id; // Assuming user data is added by a middleware
+      const userId = req.user?.id;
 
       if (!userId) {
         return res.status(401).json({
@@ -87,11 +86,26 @@ export class ReactionController {
         message = "Reaction added successfully";
       }
 
-      // Get updated reaction counts
+      // Get updated reaction counts (total for all users)
       const reactionCounts = await prisma.reaction.groupBy({
         by: ["type"],
         where: { blogId },
         _count: { type: true },
+      });
+
+      // Log activity
+      await prisma.activity.create({
+        data: {
+          userId,
+          action: reaction ? "ADD_REACTION" : "REMOVE_REACTION",
+          entity: "Reaction",
+          entityId: reaction?.id || existingReaction.id,
+          description: `${
+            reaction ? "Reacted to" : "Removed reaction from"
+          } blog: ${blog.title}`,
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent") || null,
+        },
       });
 
       return res.status(200).json({
@@ -111,23 +125,26 @@ export class ReactionController {
     }
   }
 
-  // Get Reactions by Blog (Public)
+  // Get Reactions by Blog (Public - shows counts + user's own reaction)
   static async getReactionsByBlog(req: Request, res: Response) {
     try {
       const { blogId } = req.params;
+      const userId = req.user?.id;
 
+      // Get total reaction counts
       const reactionCounts = await prisma.reaction.groupBy({
         by: ["type"],
         where: { blogId },
         _count: { type: true },
       });
 
-      const userReaction = (req as any).user?.id
+      // Get user's own reaction if authenticated
+      const userReaction = userId
         ? await prisma.reaction.findUnique({
             where: {
               blogId_userId: {
                 blogId,
-                userId: (req as any).user.id,
+                userId,
               },
             },
           })

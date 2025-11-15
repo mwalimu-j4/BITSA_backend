@@ -96,6 +96,76 @@ export class StudentEventController {
     }
   }
 
+  // Get single event details for students
+  static async getEventDetails(req: Request, res: Response) {
+    try {
+      const { eventId } = req.params;
+      const userId = req.user?.id;
+
+      const event = await prisma.event.findUnique({
+        where: { id: eventId, published: true }, // Only show published events
+        include: {
+          category: true,
+          createdBy: {
+            select: {
+              id: true,
+              name: true,
+              studentId: true,
+              image: true,
+            },
+          },
+          _count: { select: { registrations: true, gallery: true } },
+          registrations: userId
+            ? {
+                where: { userId },
+                select: {
+                  id: true,
+                  status: true,
+                  createdAt: true,
+                },
+              }
+            : false,
+        },
+      });
+
+      if (!event) {
+        return res.status(404).json({
+          success: false,
+          message: "Event not found or not published",
+        });
+      }
+
+      // Add registration info
+      const eventWithInfo = {
+        ...event,
+        isRegistered: userId
+          ? (event.registrations as any[]).length > 0
+          : false,
+        myRegistration: userId
+          ? (event.registrations as any[])[0] || null
+          : null,
+        availableSlots: event.maxAttendees
+          ? event.maxAttendees - event._count.registrations
+          : null,
+        isFull:
+          event.maxAttendees && event._count.registrations >= event.maxAttendees
+            ? true
+            : false,
+      };
+
+      return res.status(200).json({
+        success: true,
+        data: { event: eventWithInfo },
+      });
+    } catch (error) {
+      console.error("Get event details error:", error);
+      return res.status(500).json({
+        success: false,
+        message: "An error occurred while fetching event details",
+      });
+    }
+  }
+
   // Get student's own registrations
   static async getMyRegistrations(req: Request, res: Response) {
     try {

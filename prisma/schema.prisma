@@ -5,37 +5,42 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  shadowDatabaseUrl = env("DATABASE_URL")  // Use same DB as shadow
 }
 
 model User {
-  id                      String                        @id @default(cuid())
-  studentId               String                        @unique
-  email                   String                        @unique
-  phone                   String                        @unique
-  password                String
-  name                    String?
-  image                   String?
-  emailVerified           Boolean                       @default(false)
-  role                    Role                          @default(STUDENT)
-  course                  String?
-  yearOfStudy             Int?
-  bio                     String?
-  isActive                Boolean                       @default(true)
-  resetToken              String?                       @unique
-  resetTokenExpiry        DateTime?
-  createdAt               DateTime                      @default(now())
-  updatedAt               DateTime                      @updatedAt
-  lastLoginAt             DateTime?
+  id               String    @id @default(cuid())
+  studentId        String    @unique
+  email            String    @unique
+  phone            String    @unique
+  password         String
+  name             String?
+  image            String?
+  emailVerified    Boolean   @default(false)
+  role             Role      @default(STUDENT)
+  course           String?
+  yearOfStudy      Int?
+  bio              String?
+  isActive         Boolean   @default(true)
+  resetToken       String?   @unique
+  resetTokenExpiry DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  lastLoginAt      DateTime?
+
   accounts                Account[]
   activities              Activity[]
   blogs                   Blog[]
   comments                Comment[]
   eventRegistrations      EventRegistration[]
   createdEvents           Event[]                       @relation("EventCreator")
-  notifications           Notification[]
   reactions               Reaction[]
   sessions                Session[]
   registrationSubmissions EventRegistrationSubmission[]
+
+  // ✅ Keep these only (remove "notifications Notification[]")
+  notificationsSent    UserNotification[]
+  createdNotifications Notification[]     @relation("NotificationCreator")
 
   @@map("users")
 }
@@ -131,18 +136,25 @@ model Tag {
   @@map("tags")
 }
 
+// Add these fields to your Comment model in schema.prisma
+
 model Comment {
-  id        String    @id @default(cuid())
-  content   String
-  blogId    String
-  authorId  String
-  parentId  String?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  author    User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  blog      Blog      @relation(fields: [blogId], references: [id], onDelete: Cascade)
-  parent    Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
-  replies   Comment[] @relation("CommentReplies")
+  id            String    @id @default(cuid())
+  content       String
+  blogId        String
+  authorId      String
+  parentId      String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  // ✅ ADD THESE NEW FIELDS FOR SOFT DELETE
+  deletedByUser Boolean   @default(false)  // Track if user soft-deleted
+  deletedAt     DateTime? // When user soft-deleted it
+  
+  author        User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  blog          Blog      @relation(fields: [blogId], references: [id], onDelete: Cascade)
+  parent        Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies       Comment[] @relation("CommentReplies")
 
   @@map("comments")
 }
@@ -178,13 +190,13 @@ model Event {
   createdAt            DateTime               @default(now())
   updatedAt            DateTime               @updatedAt
   registrationForm     EventRegistrationForm?
- published            Boolean  @default(false)
+  published            Boolean                @default(false)
   publishedAt          DateTime?
-  requiresRegistration Boolean  @default(false)
-  registrations EventRegistration[]
-  category      Category?           @relation(fields: [categoryId], references: [id])
-  createdBy     User                @relation("EventCreator", fields: [createdById], references: [id])
-  gallery       GalleryImage[]
+  requiresRegistration Boolean                @default(false)
+  registrations        EventRegistration[]
+  category             Category?              @relation(fields: [categoryId], references: [id])
+  createdBy            User                   @relation("EventCreator", fields: [createdById], references: [id])
+  gallery              GalleryImage[]
 
   @@map("events")
 }
@@ -242,18 +254,72 @@ model Contact {
   @@map("contacts")
 }
 
+// Add to your existing schema.prisma
 model Notification {
-  id        String           @id @default(cuid())
-  userId    String
-  title     String
-  message   String
-  type      NotificationType
-  link      String?
-  read      Boolean          @default(false)
-  createdAt DateTime         @default(now())
-  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id              String               @id @default(cuid())
+  title           String
+  message         String
+  type            NotificationType
+  priority        NotificationPriority @default(MEDIUM)
+  targetAudience  TargetAudience       @default(ALL_USERS)
+  targetRoles     Role[]               @default([])
+  targetUserIds   String[]             @default([])
+  scheduledFor    DateTime?
+  sentAt          DateTime?
+  link            String?
+  linkText        String?
+  status          NotificationStatus   @default(DRAFT)
+  createdById     String
+  createdBy       User                 @relation("NotificationCreator", fields: [createdById], references: [id])
+  totalRecipients Int                  @default(0)
+  readCount       Int                  @default(0)
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  // ✅ Relation to UserNotification
+  userNotifications UserNotification[]
 
   @@map("notifications")
+}
+
+model UserNotification {
+  id             String    @id @default(cuid())
+  userId         String
+  notificationId String
+  read           Boolean   @default(false)
+  readAt         DateTime?
+  createdAt      DateTime  @default(now())
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, notificationId])
+  @@map("user_notifications")
+}
+
+// Update User model - add these relations:
+// notificationsSent UserNotification[]
+// createdNotifications Notification[] @relation("NotificationCreator")
+
+// Add these enums
+enum NotificationPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TargetAudience {
+  ALL_USERS
+  SPECIFIC_ROLES
+  SPECIFIC_USERS
+}
+
+enum NotificationStatus {
+  DRAFT
+  SCHEDULED
+  SENT
+  CANCELLED
 }
 
 model Activity {
@@ -459,12 +525,16 @@ enum ContactStatus {
   REPLIED
 }
 
+// Update existing NotificationType enum
 enum NotificationType {
   EVENT
   BLOG
   COMMENT
   SYSTEM
   ANNOUNCEMENT
+  DEADLINE
+  REMINDER
+  REGISTRATION
 }
 
 enum ResourceCategory {

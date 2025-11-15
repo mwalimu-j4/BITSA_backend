@@ -225,4 +225,90 @@ router.patch(
   EventController.updateAttendanceStatus
 );
 
+// src/routes/event.routes.ts - FINAL VERSION
+// Add this route to the STUDENT ROUTES section (after student/all route):
+
+// Get single event details (student view)
+router.get(
+  "/student/:eventId",
+  AuthMiddleware.authenticate,
+  StudentEventController.getEventDetails
+);
+
+// Complete STUDENT ROUTES section should look like this:
+
+// ============================================
+// STUDENT ROUTES (Public/Student Access)
+// ============================================
+
+// Student dashboard stats
+router.get(
+  "/student/dashboard-stats",
+  AuthMiddleware.authenticate,
+  StudentEventController.getDashboardStats
+);
+
+// Student's own registrations
+router.get(
+  "/student/my-registrations",
+  AuthMiddleware.authenticate,
+  StudentEventController.getMyRegistrations
+);
+
+// Get all events (student view with registration status)
+router.get(
+  "/student/all",
+  AuthMiddleware.authenticate,
+  StudentEventController.getAllEvents
+);
+
+// Get single event details (student view)
+router.get(
+  "/student/:eventId",
+  AuthMiddleware.authenticate,
+  StudentEventController.getEventDetails
+);
+
+// Simple registration (no form)
+router.post(
+  "/student/simple-register",
+  AuthMiddleware.authenticate,
+  EventController.simpleRegister
+);
+
+// Get registration form for event
+router.get(
+  "/student/form/:eventId",
+  AuthMiddleware.authenticate,
+  EventFormController.getFormByEventId
+);
+
+// Submit registration form
+router.post(
+  "/student/form/submit",
+  AuthMiddleware.authenticate,
+  EventFormController.submitForm
+);
+
+// Get my submission status for an event
+router.get(
+  "/student/submission/:eventId",
+  AuthMiddleware.authenticate,
+  EventFormController.getMySubmission
+);
+
+// Register for event (student)
+router.post(
+  "/student/register",
+  AuthMiddleware.authenticate,
+  StudentEventController.registerForEvent
+);
+
+// Cancel registration (student)
+router.delete(
+  "/student/register/:id",
+  AuthMiddleware.authenticate,
+  StudentEventController.cancelRegistration
+);
+
 export default router;

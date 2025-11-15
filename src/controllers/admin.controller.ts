@@ -409,14 +409,18 @@ export class AdminController {
   // Verify all unverified users
   static async verifyAllUsers(req: Request, res: Response) {
     try {
+      // Update all unverified users to verified and active
       const result = await prisma.user.updateMany({
         where: { emailVerified: false },
-        data: { emailVerified: true },
+        data: {
+          emailVerified: true,
+          isActive: true, // Ensure they can access the dashboard
+        },
       });
 
       res.json({
         success: true,
-        message: `${result.count} user(s) verified successfully`,
+        message: `${result.count} user(s) verified and activated successfully`,
         data: { count: result.count },
       });
     } catch (error) {
@@ -473,7 +477,9 @@ export class AdminController {
 
       res.json({
         success: true,
-        message: "Auto-verify setting updated successfully",
+        message: `Auto-verify ${
+          autoVerify ? "enabled" : "disabled"
+        } successfully`,
         data: {
           autoVerify: setting.value === "true",
         },

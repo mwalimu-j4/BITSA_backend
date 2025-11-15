@@ -12,7 +12,7 @@ import {
 } from "../types/auth.types";
 
 export class AuthController {
-  // Signup
+  // Signup/Register
   static async signup(req: Request<{}, {}, SignupRequest>, res: Response) {
     try {
       const {
@@ -113,6 +113,13 @@ export class AuthController {
       // Hash password
       const hashedPassword = await PasswordUtil.hash(password);
 
+      // Check auto-verify setting
+      const autoVerifySetting = await prisma.setting.findUnique({
+        where: { key: "auto_verify_users" },
+      });
+
+      const autoVerify = autoVerifySetting?.value === "true";
+
       // Create user
       const user = await prisma.user.create({
         data: {
@@ -123,6 +130,8 @@ export class AuthController {
           name: name ? ValidatorUtil.sanitizeInput(name) : null,
           course: course ? ValidatorUtil.sanitizeInput(course) : null,
           yearOfStudy: yearOfStudy || null,
+          emailVerified: autoVerify, // Auto-verify based on setting
+          isActive: autoVerify, // Auto-activate if auto-verify is on
         },
         select: {
           id: true,
@@ -135,28 +144,35 @@ export class AuthController {
           yearOfStudy: true,
           image: true,
           isActive: true,
+          emailVerified: true,
+          createdAt: true,
         },
       });
 
-      // Generate token
-      const token = TokenUtil.generate({
-        userId: user.id,
-        studentId: user.studentId,
-        role: user.role,
-      });
+      // Generate token only if auto-verify is enabled
+      let token = null;
+      let expiresAt = null;
 
-      const expiresAt = TokenUtil.getExpirationDate();
-
-      // Create session
-      await prisma.session.create({
-        data: {
+      if (autoVerify) {
+        token = TokenUtil.generate({
           userId: user.id,
-          token,
-          expiresAt,
-          ipAddress: req.ip,
-          userAgent: req.get("user-agent") || null,
-        },
-      });
+          studentId: user.studentId,
+          role: user.role,
+        });
+
+        expiresAt = TokenUtil.getExpirationDate();
+
+        // Create session
+        await prisma.session.create({
+          data: {
+            userId: user.id,
+            token,
+            expiresAt,
+            ipAddress: req.ip,
+            userAgent: req.get("user-agent") || null,
+          },
+        });
+      }
 
       // Send welcome email (non-blocking)
       EmailUtil.sendWelcomeEmail(
@@ -172,7 +188,9 @@ export class AuthController {
           action: "SIGNUP",
           entity: "User",
           entityId: user.id,
-          description: "User account created",
+          description: autoVerify
+            ? "User account created and auto-verified"
+            : "User account created - pending verification",
           ipAddress: req.ip,
           userAgent: req.get("user-agent") || null,
         },
@@ -180,11 +198,12 @@ export class AuthController {
 
       return res.status(201).json({
         success: true,
-        message: "Account created successfully! Welcome to BITSA Club.",
+        message: autoVerify
+          ? "Account created successfully! Welcome to BITSA Club."
+          : "Registration successful! Please wait for admin verification.",
         data: {
           user,
-          token,
-          expiresAt,
+          ...(autoVerify && { token, expiresAt }),
         },
       });
     } catch (error) {
@@ -209,9 +228,15 @@ export class AuthController {
         });
       }
 
-      // Find user
-      const user = await prisma.user.findUnique({
-        where: { studentId: ValidatorUtil.sanitizeInput(studentId) },
+      // Find user by studentId, email, or phone
+      const user = await prisma.user.findFirst({
+        where: {
+          OR: [
+            { studentId: ValidatorUtil.sanitizeInput(studentId) },
+            { email: ValidatorUtil.sanitizeInput(studentId).toLowerCase() },
+            { phone: ValidatorUtil.sanitizeInput(studentId) },
+          ],
+        },
         select: {
           id: true,
           studentId: true,
@@ -224,6 +249,7 @@ export class AuthController {
           yearOfStudy: true,
           image: true,
           isActive: true,
+          emailVerified: true,
         },
       });
 
@@ -243,6 +269,15 @@ export class AuthController {
         });
       }
 
+      // Check if email is verified
+      if (!user.emailVerified) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "Your account is pending verification. Please wait for admin approval.",
+        });
+      }
+
       // Verify password
       const isPasswordValid = await PasswordUtil.compare(
         password,
@@ -252,7 +287,7 @@ export class AuthController {
       if (!isPasswordValid) {
         return res.status(401).json({
           success: false,
-          message: "Invalid Student ID or password",
+          message: "Invalid credentials",
         });
       }
 
@@ -332,6 +367,21 @@ export class AuthController {
       await prisma.session.delete({
         where: { token },
       });
+
+      // Log activity if user is available
+      if (req.user?.id) {
+        await prisma.activity.create({
+          data: {
+            userId: req.user.id,
+            action: "LOGOUT",
+            entity: "User",
+            entityId: req.user.id,
+            description: "User logged out",
+            ipAddress: req.ip,
+            userAgent: req.get("user-agent") || null,
+          },
+        });
+      }
 
       return res.status(200).json({
         success: true,
